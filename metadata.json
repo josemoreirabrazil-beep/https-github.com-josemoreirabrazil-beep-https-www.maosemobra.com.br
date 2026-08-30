@@ -1,0 +1,6 @@
+{
+  "name": "Mãos em Obra",
+  "description": "Gestão inteligente de obras, reformas, controle financeiro, diário de obra e integração com Google Drive.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,16 @@
+{
+  "short_name": "Mãos em Obra",
+  "name": "Mãos em Obra - Gestão Inteligente de Canteiro",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x16 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#f59e0b",
+  "display": "standalone",
+  "orientation": "portrait"
+}
