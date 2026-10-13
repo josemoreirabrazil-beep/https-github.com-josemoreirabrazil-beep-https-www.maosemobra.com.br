@@ -17,7 +17,9 @@ import {
   HeartHandshake,
   QrCode,
   Lock,
-  ExternalLink
+  ExternalLink,
+  Download,
+  Smartphone
 } from 'lucide-react';
 import type { NavTab } from './Navigation';
 import type { Project, TeamMember, ServiceRequest } from '../types';
@@ -31,6 +33,7 @@ interface FooterProps {
   onOpenNewProject: () => void;
   onOpenAdminLogin: () => void;
   isAdminAuthenticated: boolean;
+  onOpenInstallModal?: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -42,6 +45,7 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenNewProject,
   onOpenAdminLogin,
   isAdminAuthenticated,
+  onOpenInstallModal,
 }) => {
   const laborCount = team.filter(m => {
     const isSupplier = m.role.toLowerCase().includes('loja') || m.role.toLowerCase().includes('madeireira') || m.role.toLowerCase().includes('depósito') || m.role.toLowerCase().includes('fornecedor');
@@ -119,6 +123,18 @@ export const Footer: React.FC<FooterProps> = ({
               <Briefcase className="w-3.5 h-3.5 text-purple-400" />
               <span>Técnicos & Projetistas ({technicalCount})</span>
             </button>
+
+            {/* Baixar App Link */}
+            {onOpenInstallModal && (
+              <button
+                onClick={onOpenInstallModal}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black border border-amber-400 transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Baixar e Instalar o App Oficial no Celular ou PC"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Baixar App (Celular / PC)</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -322,6 +338,17 @@ export const Footer: React.FC<FooterProps> = ({
                   <span>Backup Google Drive</span>
                 </button>
               </li>
+              {onOpenInstallModal && (
+                <li>
+                  <button
+                    onClick={onOpenInstallModal}
+                    className="hover:text-amber-300 font-extrabold transition cursor-pointer flex items-center gap-1.5 text-amber-400"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar App (Celular & PC)</span>
+                  </button>
+                </li>
+              )}
               <li>
                 <button
                   onClick={() => {

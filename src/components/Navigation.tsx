@@ -9,7 +9,8 @@ import {
   Users,
   Send,
   Truck,
-  ShieldCheck
+  ShieldCheck,
+  Download
 } from 'lucide-react';
 
 export type NavTab = 'dashboard' | 'requests' | 'rdo' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'admin';
@@ -21,6 +22,7 @@ interface NavigationProps {
   unpaidExpensesCount: number;
   requestsCount?: number;
   isAdminAuthenticated?: boolean;
+  onOpenInstallModal?: () => void;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
@@ -30,6 +32,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   unpaidExpensesCount,
   requestsCount = 0,
   isAdminAuthenticated = false,
+  onOpenInstallModal,
 }) => {
   const tabs = [
     {
@@ -127,6 +130,18 @@ export const Navigation: React.FC<NavigationProps> = ({
               </button>
             );
           })}
+
+          {/* Direct Baixar App Button in Navigation Bar */}
+          {onOpenInstallModal && (
+            <button
+              onClick={onOpenInstallModal}
+              title="Baixar App no Celular ou Computador"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-amber-500/10 hover:bg-amber-500 text-amber-600 dark:text-amber-400 hover:text-slate-950 border border-amber-500/30 transition whitespace-nowrap ml-auto shrink-0 cursor-pointer shadow-xs active:scale-95"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Baixar App</span>
+            </button>
+          )}
         </div>
       </div>
     </nav>

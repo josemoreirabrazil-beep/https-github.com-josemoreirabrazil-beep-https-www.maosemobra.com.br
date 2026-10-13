@@ -13,6 +13,8 @@ import { AdminMasterView } from './components/AdminMasterView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
 import { ProjectModal } from './components/ProjectModal';
+import { InstallAppModal } from './components/InstallAppModal';
+import { Download } from 'lucide-react';
 import { 
   getProjects, 
   saveProjects, 
@@ -65,6 +67,7 @@ export default function App() {
   // Modals
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
 
   // Admin Master Global State
   const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
@@ -295,6 +298,7 @@ export default function App() {
         isAdminAuthenticated={!!adminUser}
         onOpenAdminModal={() => setIsAdminLoginModalOpen(true)}
         onNavigateToAdmin={() => setActiveTab('admin')}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
       />
 
       {/* Navigation Sub-header */}
@@ -305,6 +309,7 @@ export default function App() {
         unpaidExpensesCount={expenses.filter(e => e.status !== 'Pago').length}
         requestsCount={serviceRequests.filter(r => r.status === 'Pendente de Orçamento').length}
         isAdminAuthenticated={!!adminUser}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -322,6 +327,7 @@ export default function App() {
             onOpenNewRdo={() => setActiveTab('rdo')}
             onOpenNewExpense={() => setActiveTab('financial')}
             onSyncDrive={() => setActiveTab('drive')}
+            onUpdateProject={handleSaveProject}
             isAuthenticated={isAuthenticated}
           />
         )}
@@ -425,6 +431,33 @@ export default function App() {
         onOpenNewProject={() => setIsNewProjectModalOpen(true)}
         onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
         isAdminAuthenticated={!!adminUser}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
+      />
+
+      {/* Floating Quick Download / Install Button */}
+      <button
+        onClick={() => setIsInstallModalOpen(true)}
+        className="fixed bottom-5 right-5 z-40 flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black shadow-xl shadow-amber-500/25 border border-amber-300 dark:border-amber-400 transition-all hover:scale-105 active:scale-95 cursor-pointer group"
+        title="Baixar Aplicativo no Celular ou Computador"
+      >
+        <div className="w-6 h-6 rounded-xl bg-slate-950 text-amber-400 flex items-center justify-center shrink-0">
+          <Download className="w-3.5 h-3.5" />
+        </div>
+        <div className="text-left hidden sm:block">
+          <div className="text-[11px] leading-tight font-extrabold uppercase tracking-wide">Baixar App</div>
+          <div className="text-[10px] leading-tight opacity-90 font-medium">Celular / Computador</div>
+        </div>
+        <span className="sm:hidden text-xs font-black">Baixar App</span>
+        <span className="flex h-2 w-2 relative">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-950 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-950"></span>
+        </span>
+      </button>
+
+      {/* Download / Install App Modal */}
+      <InstallAppModal
+        isOpen={isInstallModalOpen}
+        onClose={() => setIsInstallModalOpen(false)}
       />
 
       {/* Admin Master Login Modal */}

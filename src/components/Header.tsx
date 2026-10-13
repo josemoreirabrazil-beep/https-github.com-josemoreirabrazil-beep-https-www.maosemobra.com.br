@@ -14,7 +14,8 @@ import {
   CheckCircle2,
   AlertCircle,
   FileSpreadsheet,
-  ShieldCheck
+  ShieldCheck,
+  Download
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';
@@ -37,6 +38,7 @@ interface HeaderProps {
   isAdminAuthenticated?: boolean;
   onOpenAdminModal?: () => void;
   onNavigateToAdmin?: () => void;
+  onOpenInstallModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -55,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
   isAdminAuthenticated = false,
   onOpenAdminModal,
   onNavigateToAdmin,
+  onOpenInstallModal,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -221,6 +224,16 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Action Tools & Google Drive Sync */}
           <div className="flex items-center gap-2 sm:gap-3">
+
+            {/* Baixar App / Instalar PWA Button */}
+            <button
+              onClick={onOpenInstallModal}
+              title="Baixar e Instalar o App no Celular ou Computador"
+              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 text-xs font-black rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition cursor-pointer shrink-0 active:scale-95"
+            >
+              <Download className="w-4 h-4 text-slate-950" />
+              <span className="font-extrabold">Baixar App</span>
+            </button>
             
             {/* Admin Master Shield Button */}
             <button

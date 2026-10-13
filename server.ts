@@ -880,6 +880,49 @@ app.post('/api/mercadopago/webhook', async (req, res) => {
   }
 });
 
+// AI Pre-construction Checklist Generation
+app.post('/api/ai/generate-checklist', async (req, res) => {
+  try {
+    const { projectType } = req.body;
+    if (!projectType) {
+      return res.status(400).json({ error: 'Project type is required' });
+    }
+
+    const ai = getGeminiClient();
+
+    const prompt = `Como engenheiro civil experiente em gestão de obras, gere uma lista de tarefas críticas de "Pré-Obra" para o seguinte tipo de projeto: "${projectType}".
+
+    Retorne um JSON com o seguinte formato:
+    {
+      "checklist": [
+        { "id": "1", "task": "Descrição da tarefa", "completed": false }
+      ]
+    }
+    
+    Certifique-se de que as tarefas sejam relevantes, práticas e seguem normas de segurança e qualidade brasileiras (como NR-18, ABNT).`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.7-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
+
+    let checklistData = { checklist: [] };
+    try {
+      checklistData = JSON.parse(response.text || '{"checklist": []}');
+    } catch (e) {
+      console.error('Failed to parse AI response', e);
+    }
+
+    return res.json(checklistData);
+  } catch (error: any) {
+    console.error('Error in /api/ai/generate-checklist:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao gerar checklist' });
+  }
+});
+
 // AI Chat for Construction Consulting
 app.post('/api/ai/chat', async (req, res) => {
   try {

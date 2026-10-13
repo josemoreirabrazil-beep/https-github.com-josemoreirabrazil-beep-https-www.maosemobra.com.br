@@ -28,6 +28,7 @@ import {
 import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest } from '../types';
 import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
+import { PreConstructionChecklist } from './PreConstructionChecklist';
 
 interface DashboardViewProps {
   project: Project;
@@ -41,6 +42,7 @@ interface DashboardViewProps {
   onOpenNewRdo: () => void;
   onOpenNewExpense: () => void;
   onSyncDrive: () => void;
+  onUpdateProject: (updatedProject: Project) => void;
   isAuthenticated: boolean;
 }
 
@@ -119,6 +121,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Mercado Pago Quick Modal state
   const [isMpModalOpen, setIsMpModalOpen] = useState(false);
+
+  const generateChecklist = async () => {
+    try {
+      const response = await fetch('/api/ai/generate-checklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectType: project.type }),
+      });
+      const data = await response.json();
+      onUpdateProject({
+        ...project,
+        preConstructionChecklist: data.checklist
+      });
+    } catch (e) {
+      console.error('Erro ao gerar checklist', e);
+    }
+  };
 
   const toggleDailyCheck = (id: number) => {
     setDailyChecks(prev => {
@@ -211,6 +230,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <span>Mercado Pago</span>
             </button>
+
+            {/* Checklist Pré-Obra */}
+            <button
+              onClick={generateChecklist}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+              title="Gerar Checklist de Tarefas Pré-Obra com IA"
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>Gerar Checklist IA</span>
+            </button>
           </div>
         </div>
 
@@ -283,6 +312,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
         </div>
+
+        {/* Pre-Construction Checklist */}
+        {project.preConstructionChecklist && project.preConstructionChecklist.length > 0 && (
+          <div className="pt-4">
+            <PreConstructionChecklist
+              checklist={project.preConstructionChecklist}
+              onUpdate={(checklist) => onUpdateProject({ ...project, preConstructionChecklist: checklist })}
+            />
+          </div>
+        )}
       </div>
 
       {/* 🍱 Flagship Bento Grid (Main Showcase) */}

@@ -147,6 +147,18 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
     setIsModalOpen(false);
   };
 
+  const getExpenseAlert = (exp: Expense) => {
+    if (exp.status === 'Pago') return null;
+    
+    const expDate = new Date(exp.date);
+    const now = new Date();
+    const diffDays = (now.getTime() - expDate.getTime()) / (1000 * 60 * 60 * 24);
+    
+    if (diffDays > 7) return { type: 'overdue', message: 'Pendente há mais de 7 dias' };
+    if (diffDays >= 0 && diffDays <= 3) return { type: 'near-expiry', message: 'Próximo ao vencimento' };
+    return null;
+  };
+
   const handleStartEdit = (exp: Expense) => {
     setEditingExpenseId(exp.id);
     setTransactionType(exp.type || (exp.category === 'Entrada / Aporte do Solicitante' ? 'Receita' : 'Despesa'));
@@ -748,8 +760,13 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
                     <td className="py-3.5 px-4 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">
                       {exp.date}
                     </td>
-                    <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
+                    <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white flex items-center gap-2">
                       {exp.description}
+                      {getExpenseAlert(exp) && (
+                        <div title={getExpenseAlert(exp)?.message} className={`p-1 rounded-full ${getExpenseAlert(exp)?.type === 'overdue' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
+                          <AlertCircle className="w-3.5 h-3.5" />
+                        </div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300">
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">

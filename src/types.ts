@@ -12,6 +12,7 @@ export interface Project {
   estimatedEndDate: string;
   status: ProjectStatus;
   notes: string;
+  preConstructionChecklist?: ChecklistItem[];
   driveFolderId?: string;
   driveFolderName?: string;
   createdAt: string;
