@@ -29,6 +29,7 @@ import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRe
 import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 
 interface DashboardViewProps {
   project: Project;
@@ -58,6 +59,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenNewRdo,
   onOpenNewExpense,
   onSyncDrive,
+  onUpdateProject,
   isAuthenticated,
 }) => {
   // Financial metrics (Separated by Real Incomes & Real Outflows)
@@ -158,6 +160,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     categoryTotals[exp.category] = (categoryTotals[exp.category] || 0) + (Number(exp.actualAmount) || Number(exp.plannedAmount) || 0);
   });
   const categories = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
+
+  // Compute monthly budgeted vs actual expenses for Recharts BarChart
+  const monthlyDataMap: Record<string, { month: string; orcado: number; realizado: number }> = {};
+  expenseTransactions.forEach(exp => {
+    if (exp.type === 'Receita' || exp.category === 'Entrada / Aporte do Solicitante') return;
+    const dateParts = exp.date ? exp.date.split('-') : ['2026', '01'];
+    const monthKey = `${dateParts[0]}-${dateParts[1]}`;
+    const monthNames: Record<string, string> = {
+      '01': 'Jan', '02': 'Fev', '03': 'Mar', '04': 'Abr', '05': 'Mai', '06': 'Jun',
+      '07': 'Jul', '08': 'Ago', '09': 'Set', '10': 'Out', '11': 'Nov', '12': 'Dez'
+    };
+    const monthLabel = `${monthNames[dateParts[1]] || dateParts[1]}/${dateParts[0]}`;
+    if (!monthlyDataMap[monthKey]) {
+      monthlyDataMap[monthKey] = { month: monthLabel, orcado: 0, realizado: 0 };
+    }
+    monthlyDataMap[monthKey].orcado += Number(exp.plannedAmount) || Number(exp.actualAmount) || 0;
+    monthlyDataMap[monthKey].realizado += Number(exp.actualAmount) || 0;
+  });
+
+  const chartData = Object.values(monthlyDataMap);
+  if (chartData.length === 0) {
+    chartData.push(
+      { month: 'Jun/2026', orcado: 15000, realizado: 14200 },
+      { month: 'Jul/2026', orcado: 22000, realizado: 21500 },
+      { month: 'Ago/2026', orcado: 30000, realizado: 28900 },
+      { month: 'Set/2026', orcado: 25000, realizado: 24000 }
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -587,6 +617,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Left 2 Cols: Active Phases & Latest RDO */}
         <div className="lg:col-span-2 space-y-6">
           
+          {/* Monthly Budgeted vs Actual Expenses Recharts BarChart */}
+          <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-amber-500" />
+                  Comparação Mensal: Orçado vs Realizado
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Evolução mensal dos custos previstos (orçados) e efetivamente realizados
+                </p>
+              </div>
+              <span className="px-3 py-1 bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs font-bold rounded-full">
+                Recharts
+              </span>
+            </div>
+
+            <div className="h-72 w-full pt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                  <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
+                  <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(val) => `R$ ${val}`} />
+                  <Tooltip 
+                    formatter={(value: any) => [`R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, '']}
+                    contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                  <Bar dataKey="orcado" name="Orçado (Previsto)" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="realizado" name="Realizado (Efetivo)" fill="#10b981" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
           {/* Active Phases Bento Card */}
           <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between mb-6">
@@ -772,9 +837,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <MercadoPagoModal
         isOpen={isMpModalOpen}
         onClose={() => setIsMpModalOpen(false)}
-        title={`Cobrança Geral de Obra - ${project.title}`}
-        amount={totalPendingExpenses > 0 ? totalPendingExpenses : 500}
-        description={`Aporte / Pagamento referente ao projeto ${project.title}`}
+        title={`Assinatura Plano Pro - ${project.title}`}
+        amount={149.90}
+        description={`Assinatura Plano Mensal Pro (R$ 149,90) ou aporte referente ao projeto ${project.title}`}
         payerName={project.clientName || 'Cliente da Obra'}
         payerEmail={project.clientEmail || 'cliente@obra.com.br'}
         referenceId={`dash-${project.id}-${Date.now()}`}

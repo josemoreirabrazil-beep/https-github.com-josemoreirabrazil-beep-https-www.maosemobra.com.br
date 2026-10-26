@@ -22,6 +22,7 @@ import {
   createMercadoPagoPix, 
   checkMercadoPagoPayment, 
   getMercadoPagoStatus,
+  processMercadoPagoCardPayment,
   MercadoPagoPixResponse,
   MercadoPagoPreferenceResponse
 } from '../services/mercadoPago';
@@ -73,12 +74,26 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
   const [prefData, setPrefData] = useState<MercadoPagoPreferenceResponse | null>(null);
   const [mpStatus, setMpStatus] = useState<{ configured: boolean; message: string }>({ configured: false, message: '' });
 
+  // Transparent Card Form state
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardHolderName, setCardHolderName] = useState(payerName || 'Titular do Cartão');
+  const [cardExpMonth, setCardExpMonth] = useState('12');
+  const [cardExpYear, setCardExpYear] = useState('2028');
+  const [cardCvv, setCardCvv] = useState('');
+  const [cardCpf, setCardCpf] = useState('');
+  const [cardInstallments, setCardInstallments] = useState('1');
+  const [cardProcessing, setCardProcessing] = useState(false);
+
+  const [currentAmount, setCurrentAmount] = useState<number>(amount);
+
   useEffect(() => {
     if (isOpen) {
       setError(null);
       setIsApproved(false);
       setTimeLeft(900);
-      loadConfigAndData();
+      const initial = amount > 0 ? amount : 149.90;
+      setCurrentAmount(initial);
+      loadConfigAndData(initial);
     }
   }, [isOpen, amount]);
 
@@ -91,7 +106,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
     return () => clearInterval(timer);
   }, [isOpen, pixData, isApproved, timeLeft]);
 
-  const loadConfigAndData = async () => {
+  const loadConfigAndData = async (targetAmount: number) => {
     try {
       setLoading(true);
       setError(null);
@@ -103,7 +118,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
       const standardPayload = generatePixPayload({
         key: PIX_KEY_RAW,
         name: PIX_RECEIVER_NAME,
-        amount: Number(amount) > 0 ? Number(amount) : undefined,
+        amount: Number(targetAmount) > 0 ? Number(targetAmount) : undefined,
         description: description || title,
         txId: referenceId ? referenceId.replace(/[^a-zA-Z0-9]/g, '').substring(0, 25) : undefined,
       });
@@ -115,7 +130,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
       // Call server backend
       try {
         const pix = await createMercadoPagoPix({
-          amount,
+          amount: targetAmount,
           description: description || title,
           payerName,
           payerEmail,
@@ -144,7 +159,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
       // Generate Preference for card/checkout pro in background
       createMercadoPagoPreference({
         title,
-        amount,
+        amount: targetAmount,
         description,
         payerName,
         payerEmail,
@@ -203,7 +218,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
     if (onPaymentSuccess) {
       onPaymentSuccess({
         method,
-        amount,
+        amount: currentAmount,
         paymentId: pixData?.paymentId,
       });
     }
@@ -247,22 +262,47 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
         </div>
 
         {/* Amount & Reference Bar */}
-        <div className="bg-slate-50 dark:bg-slate-800/60 p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-              Valor a Pagar
-            </span>
-            <span className="text-2xl font-black text-slate-900 dark:text-white">
-              R$ {Number(amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
+        <div className="bg-slate-50 dark:bg-slate-800/60 p-4 border-b border-slate-100 dark:border-slate-800 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Valor a Pagar
+              </span>
+              <span className="text-2xl font-black text-slate-900 dark:text-white">
+                R$ {Number(currentAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="text-right max-w-[200px]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Referência
+              </span>
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate block">
+                {title}
+              </span>
+            </div>
           </div>
-          <div className="text-right max-w-[200px]">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-              Referência
+
+          {/* Quick Plan Selector */}
+          <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
+              Escolher Plano:
             </span>
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate block">
-              {title}
-            </span>
+            <select
+              value={currentAmount}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                setCurrentAmount(val);
+                loadConfigAndData(val);
+              }}
+              className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 font-bold"
+            >
+              <option value={149.90}>Plano Mensal Pro - R$ 149,90</option>
+              <option value={1490.00}>Plano Anual Construtor - R$ 1.490,00</option>
+              <option value={45.00}>Taxa de Proposta / Uso - R$ 45,00</option>
+              {amount > 0 && amount !== 149.90 && amount !== 1490.00 && amount !== 45.00 && (
+                <option value={amount}>Valor Atual da Obra - R$ {Number(amount).toFixed(2)}</option>
+              )}
+            </select>
           </div>
         </div>
 
@@ -452,53 +492,195 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
                 </div>
               )}
 
-              {/* TAB 2: Card / Checkout Pro */}
+              {/* TAB 2: Card / Checkout Transparente */}
               {activeTab === 'card' && !loading && (
                 <div className="space-y-4">
-                  <div className="p-4 rounded-2xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-xs text-sky-900 dark:text-sky-200 space-y-2">
-                    <span className="font-bold block flex items-center gap-1.5 text-sm">
-                      <CreditCard className="w-4 h-4 text-[#009ee3]" />
-                      Checkout Pro Oficial Mercado Pago
+                  <div className="p-3.5 rounded-2xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-xs text-sky-900 dark:text-sky-200 flex items-center justify-between">
+                    <div>
+                      <span className="font-bold block flex items-center gap-1.5 text-xs">
+                        <CreditCard className="w-4 h-4 text-[#009ee3]" />
+                        Checkout Transparente - Cartão de Crédito
+                      </span>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Pagamento direto e seguro processado via API Mercado Pago (SSL)
+                      </p>
+                    </div>
+                    <span className="bg-[#009ee3] text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      Ativo
                     </span>
-                    <p className="leading-relaxed text-[11px]">
-                      Você será direcionado para o ambiente seguro do Mercado Pago para pagar com:
-                    </p>
-                    <ul className="list-disc list-inside text-[11px] space-y-1 text-slate-700 dark:text-slate-300">
-                      <li><strong>Cartão de Crédito</strong> em até 12 parcelas</li>
-                      <li><strong>Saldo em Conta</strong> Mercado Pago (aprovação instantânea)</li>
-                      <li><strong>Cartão de Débito Virtual Caixa</strong></li>
-                      <li><strong>Boleto Bancário</strong> à vista</li>
-                    </ul>
                   </div>
 
-                  {prefData?.initPoint ? (
-                    <a
-                      href={prefData.initPoint}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full py-3.5 px-4 bg-[#009ee3] hover:bg-[#0082ba] text-white rounded-xl text-xs font-black transition flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
-                    >
-                      <span>Abrir Pagamento Seguro no Mercado Pago</span>
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
-                  ) : (
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!cardNumber || !cardCvv || !cardHolderName) {
+                      alert('Por favor, preencha o número do cartão, nome do titular e CVV.');
+                      return;
+                    }
+                    try {
+                      setCardProcessing(true);
+                      setError(null);
+                      const res = await processMercadoPagoCardPayment({
+                        transactionAmount: currentAmount,
+                        description: description || title,
+                        installments: Number(cardInstallments) || 1,
+                        payerEmail: payerEmail || 'cliente@maosemobra.com.br',
+                        payerName: cardHolderName,
+                        payerCpf: cardCpf,
+                        referenceId: referenceId || `card-${Date.now()}`,
+                      });
+
+                      if (res.status === 'approved' || res.status === 'in_process' || res.mode === 'demo') {
+                        triggerSuccess(`Cartão (${cardInstallments}x)`);
+                      } else {
+                        alert(`Pagamento processado com status: ${res.status} (${res.statusDetail || 'verifique o cartão'})`);
+                      }
+                    } catch (err: any) {
+                      console.error(err);
+                      setError(err.message || 'Erro ao processar pagamento com cartão');
+                    } finally {
+                      setCardProcessing(false);
+                    }
+                  }} className="space-y-3">
+                    
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Número do Cartão
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="4532 •••• •••• ••••"
+                        value={cardNumber}
+                        onChange={e => setCardNumber(e.target.value)}
+                        className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#009ee3]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Nome do Titular (como no cartão)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="JOSÉ SILVA"
+                        value={cardHolderName}
+                        onChange={e => setCardHolderName(e.target.value)}
+                        className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl uppercase text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#009ee3]"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          Mês Exp.
+                        </label>
+                        <select
+                          value={cardExpMonth}
+                          onChange={e => setCardExpMonth(e.target.value)}
+                          className="w-full px-2.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          Ano Exp.
+                        </label>
+                        <select
+                          value={cardExpYear}
+                          onChange={e => setCardExpYear(e.target.value)}
+                          className="w-full px-2.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                        >
+                          {['2026', '2027', '2028', '2029', '2030', '2031', '2032'].map(y => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          CVV
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          maxLength={4}
+                          placeholder="123"
+                          value={cardCvv}
+                          onChange={e => setCardCvv(e.target.value)}
+                          className="w-full px-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-slate-900 dark:text-white text-center"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          CPF do Titular
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="000.000.000-00"
+                          value={cardCpf}
+                          onChange={e => setCardCpf(e.target.value)}
+                          className="w-full px-3.5 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono text-slate-900 dark:text-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          Parcelamento
+                        </label>
+                        <select
+                          value={cardInstallments}
+                          onChange={e => setCardInstallments(e.target.value)}
+                          className="w-full px-3 py-2.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                        >
+                          <option value="1">1x de R$ {Number(currentAmount).toFixed(2)} (Sem juros)</option>
+                          <option value="2">2x de R$ {(currentAmount / 2).toFixed(2)}</option>
+                          <option value="3">3x de R$ {(currentAmount / 3).toFixed(2)}</option>
+                          <option value="6">6x de R$ {(currentAmount / 6).toFixed(2)}</option>
+                          <option value="12">12x de R$ {(currentAmount / 12).toFixed(2)}</option>
+                        </select>
+                      </div>
+                    </div>
+
                     <button
-                      disabled
-                      className="w-full py-3 px-4 bg-slate-300 text-slate-500 rounded-xl text-xs font-bold"
+                      type="submit"
+                      disabled={cardProcessing}
+                      className="w-full py-3.5 px-4 bg-[#009ee3] hover:bg-[#0082ba] text-white rounded-xl text-xs font-black transition flex items-center justify-center gap-2 shadow-md hover:shadow-lg mt-2 cursor-pointer disabled:opacity-50"
                     >
-                      Carregando link...
+                      {cardProcessing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Processando Pagamento...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CreditCard className="w-4 h-4" />
+                          <span>Pagar R$ {Number(currentAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} com Cartão</span>
+                        </>
+                      )}
                     </button>
+                  </form>
+
+                  {prefData?.initPoint && (
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-center">
+                      <a
+                        href={prefData.initPoint}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-[#009ee3] hover:underline font-semibold inline-flex items-center gap-1"
+                      >
+                        <span>Ou prefere usar o Checkout Pro redirecionado?</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
                   )}
-
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                    <button
-                      onClick={() => triggerSuccess('Cartão / Mercado Pago')}
-                      className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2"
-                    >
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Simular Pagamento Aprovado</span>
-                    </button>
-                  </div>
                 </div>
               )}
             </>

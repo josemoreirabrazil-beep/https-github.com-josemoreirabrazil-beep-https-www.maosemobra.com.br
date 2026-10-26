@@ -96,3 +96,51 @@ export async function checkMercadoPagoPayment(paymentId: string | number): Promi
   }
   return response.json();
 }
+
+export async function processMercadoPagoCardPayment(data: {
+  transactionAmount: number;
+  token?: string;
+  description?: string;
+  installments?: number;
+  paymentMethodId?: string;
+  payerEmail?: string;
+  payerCpf?: string;
+  payerName?: string;
+  referenceId?: string;
+}): Promise<MercadoPagoPixResponse> {
+  const response = await fetch('/api/mercadopago/process-payment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao processar pagamento com cartão');
+  }
+
+  return response.json();
+}
+
+export async function batchCreateMercadoPagoPreferences(items: Array<{
+  title: string;
+  amount: number;
+  payerName?: string;
+  payerEmail?: string;
+  referenceId?: string;
+  description?: string;
+}>): Promise<{ success: boolean; preferences: Array<any> }> {
+  const response = await fetch('/api/mercadopago/batch-preferences', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao gerar lote de preferências no Mercado Pago');
+  }
+
+  return response.json();
+}
+

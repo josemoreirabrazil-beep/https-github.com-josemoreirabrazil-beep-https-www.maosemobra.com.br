@@ -960,7 +960,6 @@ export const ServiceRequestsView: React.FC<ServiceRequestsViewProps> = ({
                 totalAmount,
                 notes,
                 createdAt: new Date().toISOString(),
-                isOutOfTown: selectedRequestForQuote.isOutOfTown,
               }
             };
             onUpdateServiceRequest(updatedRequest);

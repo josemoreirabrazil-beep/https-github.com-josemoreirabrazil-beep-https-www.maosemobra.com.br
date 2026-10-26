@@ -26,7 +26,12 @@ import {
   Sliders,
   QrCode,
   CreditCard,
-  ArrowUpRight
+  ArrowUpRight,
+  AlertCircle,
+  Loader2,
+  ExternalLink,
+  Copy,
+  Check
 } from 'lucide-react';
 import type { Expense, ExpenseCategory, PaymentStatus, Project, ProposalServiceItem, LogisticsQuote, TransactionType } from '../types';
 import { uploadTextFile, getOrCreateProjectFolder } from '../services/googleDrive';
@@ -34,6 +39,14 @@ import { BLANK_SERVICE_TEMPLATES, generateBlankExpensesForProject } from '../dat
 import { EditBudgetModal } from './EditBudgetModal';
 import { ServiceProposalModal } from './ServiceProposalModal';
 import { MercadoPagoModal } from './MercadoPagoModal';
+import { 
+  createMercadoPagoPreference, 
+  createMercadoPagoPix, 
+  checkMercadoPagoPayment, 
+  getMercadoPagoStatus,
+  processMercadoPagoCardPayment,
+  batchCreateMercadoPagoPreferences
+} from '../services/mercadoPago';
 import confetti from 'canvas-confetti';
 
 interface FinancialViewProps {
@@ -114,6 +127,40 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
 
   // Template dropdown menu
   const [showTemplateDropdown, setShowTemplateDropdown] = useState(false);
+
+  // Mercado Pago Revenue Sync State
+  const [isSyncingRevenues, setIsSyncingRevenues] = useState(false);
+  const [syncResultModal, setSyncResultModal] = useState<{ open: boolean; preferences: Array<any> } | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  const handleSendRevenuesToMercadoPago = async () => {
+    const pendingIncomes = incomeTransactions.filter(e => e.status !== 'Pago');
+    const itemsToSend = (pendingIncomes.length > 0 ? pendingIncomes : incomeTransactions).map(e => ({
+      title: e.description || 'Receita / Aporte de Obra',
+      amount: Number(e.actualAmount) || Number(e.plannedAmount) || 0,
+      payerName: e.supplier || project.clientName || 'Cliente / Solicitante',
+      referenceId: e.id,
+      description: `Cobrança automática enviada ao Mercado Pago para ${e.description}`
+    }));
+
+    if (itemsToSend.length === 0) {
+      alert('Nenhuma receita ou aporte cadastrado para enviar ao Mercado Pago. Cadastre uma receita na obra primeiro.');
+      return;
+    }
+
+    setIsSyncingRevenues(true);
+    try {
+      const res = await batchCreateMercadoPagoPreferences(itemsToSend);
+      if (res.success) {
+        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        setSyncResultModal({ open: true, preferences: res.preferences });
+      }
+    } catch (err: any) {
+      alert(err.message || 'Erro ao enviar receitas para o Mercado Pago');
+    } finally {
+      setIsSyncingRevenues(false);
+    }
+  };
 
   // Financial calculations
   const totalPlanned = Number(project.budgetTotal) || 0;
@@ -210,9 +257,9 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
 
   const handleOpenMercadoPagoQuickCharge = () => {
     setMpPaymentTarget({
-      title: `Aporte / Pagamento de Obra - ${project.title}`,
-      amount: 500,
-      description: `Cobrança emitida para cliente de ${project.title}`,
+      title: `Plano Mensal Pro / Aporte - ${project.title}`,
+      amount: 149.90,
+      description: `Assinatura Plano Mensal Pro (R$ 149,90) ou aporte emitido para ${project.title}`,
       payerName: project.clientName || 'Cliente da Obra',
       isNewIncome: true,
     });
@@ -572,6 +619,23 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
               mp
             </div>
             <span>Cobrança Mercado Pago</span>
+          </button>
+
+          {/* Send Revenues to Mercado Pago Button */}
+          <button
+            onClick={handleSendRevenuesToMercadoPago}
+            disabled={isSyncingRevenues}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-[#009ee3] hover:from-emerald-700 hover:to-[#0082ba] text-white font-bold rounded-xl text-xs shadow-xs transition"
+            title="Enviar automaticamente as receitas e aportes disponíveis para a conta do Mercado Pago"
+          >
+            {isSyncingRevenues ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <div className="w-4 h-4 rounded-md bg-white text-[#009ee3] flex items-center justify-center font-black text-[9px]">
+                mp
+              </div>
+            )}
+            <span>Enviar Receitas ao MP</span>
           </button>
 
           {/* New Expense Button */}
@@ -1110,6 +1174,105 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
         referenceId={mpPaymentTarget.expenseId || `proj-${project.id}-${Date.now()}`}
         onPaymentSuccess={handleMercadoPagoPaymentSuccess}
       />
+
+      {/* Sync Revenues Result Modal */}
+      {syncResultModal?.open && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 w-full max-w-2xl overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-gradient-to-r from-emerald-600/10 to-[#009ee3]/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-[#009ee3] text-white flex items-center font-black text-sm justify-center shadow-md">
+                  mp
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Receitas Enviadas ao Mercado Pago
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Links de cobrança e checkout gerados e integrados com sucesso na sua conta do Mercado Pago.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSyncResultModal(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold block mb-0.5">Sincronização Concluída!</span>
+                  As receitas da obra foram convertidas em preferências de pagamento ativas no Mercado Pago. Compartilhe os links abaixo com os pagadores ou utilize no checkout.
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {syncResultModal.preferences.map((pref, idx) => (
+                  <div key={idx} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                        {pref.title}
+                      </span>
+                      <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 block mt-0.5">
+                        R$ {Number(pref.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5 font-mono">
+                        Ref: {pref.referenceId} ({pref.mode === 'live' ? 'Produção' : 'Demonstração'})
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(pref.initPoint);
+                          setCopiedIndex(idx);
+                          setTimeout(() => setCopiedIndex(null), 2000);
+                        }}
+                        className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-white font-semibold rounded-xl text-xs transition cursor-pointer"
+                      >
+                        {copiedIndex === idx ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Copiado</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copiar Link</span>
+                          </>
+                        )}
+                      </button>
+
+                      <a
+                        href={pref.initPoint}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#009ee3] hover:bg-[#0082ba] text-white font-bold rounded-xl text-xs transition shadow-xs"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Abrir Checkout</span>
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+              <button
+                onClick={() => setSyncResultModal(null)}
+                className="px-6 py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs transition hover:opacity-90 cursor-pointer"
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

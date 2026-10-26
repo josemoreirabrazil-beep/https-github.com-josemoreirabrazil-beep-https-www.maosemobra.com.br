@@ -5,6 +5,7 @@ export interface Project {
   id: string;
   title: string;
   clientName: string;
+  clientEmail?: string;
   address: string;
   type: ProjectType;
   budgetTotal: number;

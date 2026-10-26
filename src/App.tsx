@@ -46,10 +46,14 @@ export default function App() {
   const currentProject = projects.find(p => p.id === currentProjectId) || projects[0] || {
     id: 'proj-1',
     title: 'Minha Obra',
+    clientName: 'Cliente',
+    address: 'Endereço da Obra',
     type: 'Reforma',
     status: 'Em Andamento',
     budgetTotal: 0,
     startDate: new Date().toISOString().split('T')[0],
+    estimatedEndDate: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+    notes: 'Projeto inicial',
     createdAt: new Date().toISOString(),
   };
 
