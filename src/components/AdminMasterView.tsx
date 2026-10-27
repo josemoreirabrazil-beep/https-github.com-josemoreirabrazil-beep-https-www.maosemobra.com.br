@@ -586,9 +586,10 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
             <button
               onClick={handleExportFullSnapshot}
               className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+              title="Exportar todos os dados (projetos, diários, despesas) em arquivo JSON para backup manual"
             >
               <Download className="w-4 h-4 text-amber-400" />
-              <span>Snapshot Global JSON</span>
+              <span>Exportar Backup JSON</span>
             </button>
 
             <button
@@ -1320,17 +1321,17 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
                 <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase flex items-center gap-2">
                   <Download className="w-4 h-4 text-amber-500" />
-                  Exportar Backup Global
+                  Exportar Todos os Dados (Backup JSON)
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  Gere um arquivo JSON com todas as tabelas e dados consolidados.
+                  Exporte todos os dados da aplicação (projetos, diários de obra, despesas, etapas e equipe) em um arquivo JSON para facilitar o backup manual pelo gestor.
                 </p>
                 <button
                   onClick={handleExportFullSnapshot}
                   className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-md"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Baixar Backup Completo JSON</span>
+                  <span>Baixar Arquivo JSON de Backup</span>
                 </button>
               </div>
 

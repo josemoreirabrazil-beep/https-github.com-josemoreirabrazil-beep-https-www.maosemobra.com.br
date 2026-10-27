@@ -23,13 +23,16 @@ import {
   Truck,
   CheckSquare,
   ShieldCheck,
-  QrCode
+  QrCode,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest } from '../types';
 import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import confetti from 'canvas-confetti';
 
 interface DashboardViewProps {
   project: Project;
@@ -123,21 +126,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Mercado Pago Quick Modal state
   const [isMpModalOpen, setIsMpModalOpen] = useState(false);
+  const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
+  const [selectedChecklistType, setSelectedChecklistType] = useState(project.type || 'Reforma Residencial');
 
   const generateChecklist = async () => {
     try {
+      setIsGeneratingChecklist(true);
       const response = await fetch('/api/ai/generate-checklist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectType: project.type }),
+        body: JSON.stringify({ projectType: selectedChecklistType }),
       });
       const data = await response.json();
-      onUpdateProject({
-        ...project,
-        preConstructionChecklist: data.checklist
-      });
+      if (data.checklist) {
+        onUpdateProject({
+          ...project,
+          preConstructionChecklist: data.checklist,
+          type: selectedChecklistType as any,
+        });
+        confetti({ particleCount: 70, spread: 70 });
+      }
     } catch (e) {
       console.error('Erro ao gerar checklist', e);
+      alert('Erro ao gerar checklist com IA.');
+    } finally {
+      setIsGeneratingChecklist(false);
     }
   };
 
@@ -343,15 +356,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         </div>
 
-        {/* Pre-Construction Checklist */}
-        {project.preConstructionChecklist && project.preConstructionChecklist.length > 0 && (
-          <div className="pt-4">
-            <PreConstructionChecklist
-              checklist={project.preConstructionChecklist}
-              onUpdate={(checklist) => onUpdateProject({ ...project, preConstructionChecklist: checklist })}
-            />
+        {/* AI Pre-Construction Checklist Generator Card */}
+        <div className="mt-6 p-6 rounded-3xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shadow-md">
+                <Bot className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  Gerador de Checklist Pré-Obra com Inteligência Artificial (Gemini)
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Selecione o tipo de obra e gere instantaneamente uma lista de tarefas críticas de pré-construção adaptada ao seu projeto.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={selectedChecklistType}
+                onChange={(e) => setSelectedChecklistType(e.target.value)}
+                className="px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200"
+              >
+                <option value="Reforma Residencial">Reforma Residencial</option>
+                <option value="Construção Nova (Casa)">Construção Nova (Casa)</option>
+                <option value="Reforma Comercial">Reforma Comercial</option>
+                <option value="Construção Industrial">Construção Industrial</option>
+                <option value="Pintura e Acabamento">Pintura e Acabamento</option>
+              </select>
+
+              <button
+                onClick={generateChecklist}
+                disabled={isGeneratingChecklist}
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                {isGeneratingChecklist ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Gerando com IA...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>Gerar Checklist Pré-Obra</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        )}
+
+          {/* Pre-Construction Checklist Display */}
+          {project.preConstructionChecklist && project.preConstructionChecklist.length > 0 ? (
+            <div className="pt-2">
+              <PreConstructionChecklist
+                checklist={project.preConstructionChecklist}
+                onUpdate={(checklist) => onUpdateProject({ ...project, preConstructionChecklist: checklist })}
+              />
+            </div>
+          ) : (
+            <div className="p-4 bg-white/60 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-500">
+              Nenhum checklist gerado para este projeto ainda. Selecione o tipo de obra acima e clique em <strong>"Gerar Checklist Pré-Obra"</strong> para acionar a inteligência artificial.
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 🍱 Flagship Bento Grid (Main Showcase) */}

@@ -162,6 +162,46 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
     }
   };
 
+  // Automated PIX transfer to Mercado Pago account state
+  const [isTransferringPix, setIsTransferringPix] = useState(false);
+  const [transferResultModal, setTransferResultModal] = useState<{ open: boolean; data: any } | null>(null);
+
+  const handleTransferAvailableCashToMercadoPago = async () => {
+    const amountToTransfer = availableCash > 0 ? availableCash : totalReceived;
+    if (amountToTransfer <= 0) {
+      alert('Nenhum valor disponível para transferência imediata no momento.');
+      return;
+    }
+
+    if (!window.confirm(`Deseja transferir automaticamente o saldo disponível de R$ ${amountToTransfer.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via chave PIX (+55 73998599213) para a conta do Mercado Pago imediatamente?`)) {
+      return;
+    }
+
+    setIsTransferringPix(true);
+    try {
+      const response = await fetch('/api/mercadopago/transfer-pix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: amountToTransfer,
+          projectName: project.title,
+          beneficiaryName: 'MAOS EM OBRA - Jose Moreira',
+          pixKey: '+5573998599213',
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erro na transferência PIX');
+
+      confetti({ particleCount: 120, spread: 80, origin: { y: 0.5 } });
+      setTransferResultModal({ open: true, data });
+    } catch (err: any) {
+      alert(err.message || 'Erro ao realizar transferência automática via PIX');
+    } finally {
+      setIsTransferringPix(false);
+    }
+  };
+
   // Financial calculations
   const totalPlanned = Number(project.budgetTotal) || 0;
   const incomeTransactions = expenses.filter(e => e.type === 'Receita' || e.category === 'Entrada / Aporte do Solicitante');
@@ -636,6 +676,23 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
               </div>
             )}
             <span>Enviar Receitas ao MP</span>
+          </button>
+
+          {/* Transfer Available Cash to Mercado Pago via PIX Button */}
+          <button
+            onClick={handleTransferAvailableCashToMercadoPago}
+            disabled={isTransferringPix}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:opacity-95 text-white font-black rounded-xl text-xs shadow-xs transition cursor-pointer disabled:opacity-50"
+            title="Transferir automaticamente todo o saldo disponível via PIX (+55 73998599213) para a conta do Mercado Pago"
+          >
+            {isTransferringPix ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <div className="w-4 h-4 rounded-md bg-white text-emerald-600 flex items-center justify-center font-black text-[9px]">
+                PIX
+              </div>
+            )}
+            <span>Transferir Saldo PIX p/ MP</span>
           </button>
 
           {/* New Expense Button */}
@@ -1270,6 +1327,47 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
                 Concluir
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Success Modal */}
+      {transferResultModal?.open && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200 p-6 text-center space-y-4">
+            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+              <Check className="w-8 h-8" />
+            </div>
+
+            <h3 className="text-xl font-black text-slate-900 dark:text-white">
+              Transferência PIX Realizada!
+            </h3>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              {transferResultModal.data.message}
+            </p>
+
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 text-left space-y-1.5 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-slate-400">ID da Transferência:</span>
+                <span className="font-bold text-slate-800 dark:text-white">{transferResultModal.data.transferId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Chave PIX Destino:</span>
+                <span className="font-bold text-emerald-600">{transferResultModal.data.pixKey}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Favorecido:</span>
+                <span className="font-bold text-slate-800 dark:text-white">{transferResultModal.data.beneficiary}</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setTransferResultModal(null)}
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition shadow-md cursor-pointer"
+            >
+              Concluir e Fechar
+            </button>
           </div>
         </div>
       )}
