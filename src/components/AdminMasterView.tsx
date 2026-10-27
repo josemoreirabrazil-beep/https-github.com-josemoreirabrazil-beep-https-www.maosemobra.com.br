@@ -165,6 +165,48 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [formPlanAudience, setFormPlanAudience] = useState('');
   const [formPlanFeatures, setFormPlanFeatures] = useState('');
 
+  // Withdrawal & PIX Transfer State
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [withdrawalResultModal, setWithdrawalResultModal] = useState<any | null>(null);
+
+  const handleAdminWithdrawalClick = async () => {
+    const amountToWithdraw = cashflowSummary.totalCollected;
+    if (amountToWithdraw <= 0) {
+      alert('Nenhum valor disponível para saque no momento.');
+      return;
+    }
+
+    if (!confirm(`Deseja transferir e sacar o valor total de R$ ${amountToWithdraw.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} imediatamente para a conta do Mercado Pago via chave PIX (${MASTER_CREDENTIALS.pixKey})?`)) {
+      return;
+    }
+
+    setIsWithdrawing(true);
+    setWithdrawalResultModal(null);
+    try {
+      const response = await fetch('/api/mercadopago/transfer-pix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: amountToWithdraw,
+          projectName: 'Caixa Admin Master - Mãos em Obra',
+          beneficiaryName: MASTER_CREDENTIALS.name,
+          pixKey: MASTER_CREDENTIALS.pixKey,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erro na transferência PIX');
+
+      confetti({ particleCount: 130, spread: 80, origin: { y: 0.5 } });
+      setWithdrawalResultModal(data);
+      await loadAllAdminData(false);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao realizar saque via PIX para o Mercado Pago');
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
+
   // Load status, logs, and subscribers billing on mount
   useEffect(() => {
     loadAllAdminData();
@@ -809,6 +851,60 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 <span>Imprimir</span>
               </button>
             </div>
+          </div>
+
+          {/* Mercado Pago Instant Withdrawal / PIX Transfer Card */}
+          <div className="p-5 rounded-3xl bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/60 border-2 border-emerald-500/40 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30">
+                  <Wallet className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>Saque para Conta Mercado Pago via Chave PIX</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
+                      Disponível: R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Transfira instantaneamente todos os valores arrecadados para a sua conta do Mercado Pago usando a chave PIX <strong className="text-emerald-400">{MASTER_CREDENTIALS.pixKey}</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleAdminWithdrawalClick}
+                disabled={isWithdrawing || cashflowSummary.totalCollected <= 0}
+                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {isWithdrawing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Transferindo via PIX...</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowUpRight className="w-4 h-4" />
+                    <span>Sacar R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {withdrawalResultModal && (
+              <div className="p-4 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs space-y-2">
+                <div className="flex items-center gap-2 font-bold text-emerald-300">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Transferência e Saque Realizados com Sucesso!</span>
+                </div>
+                <div className="text-[11px] text-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 font-mono">
+                  <div>ID Transação: <strong>{withdrawalResultModal.transferId}</strong></div>
+                  <div>Valor: <strong>R$ {withdrawalResultModal.amount?.toFixed(2)}</strong></div>
+                  <div>Chave PIX: <strong>{withdrawalResultModal.pixKey}</strong></div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* SUBSCRIPTION PLANS PRICING TABLE & PRICE UPDATES */}
