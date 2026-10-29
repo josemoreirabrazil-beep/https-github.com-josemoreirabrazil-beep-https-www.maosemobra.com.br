@@ -27,7 +27,9 @@ import {
   Sparkles,
   Loader2,
   Activity,
-  RefreshCw
+  RefreshCw,
+  Briefcase,
+  Send
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser } from '../types';
 import type { NavTab } from './Navigation';
@@ -945,10 +947,10 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-3">
             Ações Rápidas de Campo
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
             <button
               onClick={onOpenNewRdo}
-              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs"
+              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
             >
               <ClipboardList className="w-5 h-5 mx-auto text-amber-600 mb-1" />
               <span className="text-xs font-bold text-slate-900 dark:text-white block">+ Novo RDO</span>
@@ -956,15 +958,31 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
             <button
               onClick={onOpenNewExpense}
-              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs"
+              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
             >
               <Wallet className="w-5 h-5 mx-auto text-emerald-600 mb-1" />
               <span className="text-xs font-bold text-slate-900 dark:text-white block">+ Custo</span>
             </button>
 
             <button
+              onClick={() => onNavigate('opportunities')}
+              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
+            >
+              <Briefcase className="w-5 h-5 mx-auto text-amber-500 mb-1" />
+              <span className="text-xs font-bold text-slate-900 dark:text-white block">Vagas & Mão de Obra</span>
+            </button>
+
+            <button
+              onClick={() => onNavigate('invitations')}
+              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
+            >
+              <Send className="w-5 h-5 mx-auto text-emerald-500 mb-1" />
+              <span className="text-xs font-bold text-slate-900 dark:text-white block">Disparo Convites</span>
+            </button>
+
+            <button
               onClick={() => onNavigate('requests')}
-              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs"
+              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
             >
               <Truck className="w-5 h-5 mx-auto text-amber-600 mb-1" />
               <span className="text-xs font-bold text-slate-900 dark:text-white block">Logística</span>
@@ -972,7 +990,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
             <button
               onClick={() => onNavigate('calculator')}
-              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs"
+              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
             >
               <Calculator className="w-5 h-5 mx-auto text-blue-600 mb-1" />
               <span className="text-xs font-bold text-slate-900 dark:text-white block">Calcular</span>
@@ -980,7 +998,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
             <button
               onClick={() => onNavigate('calculator')}
-              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-purple-50 dark:hover:bg-purple-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs"
+              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-purple-50 dark:hover:bg-purple-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
             >
               <Bot className="w-5 h-5 mx-auto text-purple-600 mb-1" />
               <span className="text-xs font-bold text-slate-900 dark:text-white block">Mestre IA</span>

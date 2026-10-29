@@ -356,8 +356,52 @@ export interface ConstructionOpportunity {
   companyName: string;
   contactName: string;
   contactPhone: string;
+  contactEmail?: string;
+  creatorRole?: 'Solicitante' | 'Contratante' | 'Empresa';
   category: string; // e.g. "Alvenaria", "Elétrica", "Pintura"
   urgency: 'Normal' | 'Alta' | 'Crítica';
+}
+
+export type ProviderAvailability = 'Disponível Imediato' | 'Disponível em 15 dias' | 'Agendamento Prévio' | 'Ocupado';
+
+export interface ProviderReview {
+  id: string;
+  providerId: string;
+  reviewerName: string;
+  reviewerRole?: 'Solicitante' | 'Contratante' | 'Engenheiro' | 'Proprietário';
+  projectName?: string;
+  rating: number; // 1 a 5
+  qualityRating?: number; // 1 a 5
+  punctualityRating?: number; // 1 a 5
+  costBenefitRating?: number; // 1 a 5
+  comment: string;
+  date: string;
+  recommend: boolean;
+}
+
+export interface ServiceProviderProfile {
+  id: string;
+  name: string;
+  companyOrTradeName?: string;
+  category: string; // e.g. "Pedreiro / Alvenaria", "Eletricista", "Pintor", "Mestre de Obras", etc.
+  specialties: string[];
+  city: string;
+  state: string;
+  phone: string;
+  whatsapp: string;
+  email?: string;
+  dailyRate?: string;
+  experienceYears: number;
+  bio: string;
+  availability: ProviderAvailability;
+  rating: number;
+  reviewsCount: number;
+  reviews?: ProviderReview[];
+  rankingBadge?: 'Top 1 Ouro' | 'Top 2 Prata' | 'Top 3 Bronze' | 'Destaque 5 Estrelas';
+  documentType?: 'CPF' | 'CNPJ' | 'MEI';
+  registeredAt: string;
+  verified: boolean;
+  pixKey?: string;
 }
 
 export type GoalType = 'Conclusão Física' | 'Economia de Orçamento' | 'Segurança/Zero Acidentes' | 'Qualidade/RDOs' | 'Outro';
@@ -374,4 +418,31 @@ export interface ProjectGoal {
   deadline?: string;
   createdAt: string;
 }
+
+export type CorporateContactRegion = 'SP' | 'RJ' | 'MG' | 'BA' | 'Nacional' | 'Internacional';
+export type CorporateContactStatus = 'Pendente' | 'Na Fila' | 'Enviado' | 'Respondido';
+
+export interface CorporateContact {
+  id: string;
+  name: string;
+  phone: string;
+  whatsapp: string;
+  email: string;
+  region: CorporateContactRegion;
+  status: CorporateContactStatus;
+  category?: string;
+  lastDispatchedAt?: string;
+  dispatchChannel?: 'WhatsApp' | 'Email';
+  notes?: string;
+}
+
+export interface InvitationTemplate {
+  id: string;
+  title: string;
+  subject: string;
+  channel: 'WhatsApp' | 'Email';
+  body: string;
+}
+
+
 

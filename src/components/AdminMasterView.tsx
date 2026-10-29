@@ -48,7 +48,8 @@ import {
   Building2,
   HardHat,
   Store,
-  Briefcase
+  Briefcase,
+  Send
 } from 'lucide-react';
 import type { 
   Project, 
@@ -84,6 +85,8 @@ import {
   saveSubscriptionPlan,
   deleteSubscriptionPlan
 } from '../services/subscriberBilling';
+import { INITIAL_CORPORATE_CONTACTS } from '../data/corporateContacts';
+import { loadCorporateContacts, updateCorporateContactStatus } from '../services/storage';
 import confetti from 'canvas-confetti';
 
 interface AdminMasterViewProps {
@@ -232,7 +235,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       const data = await response.json();
       if (data.results) {
         setProspecResults(data.results);
-        setSelectedProspecs(new Set()); // Reset selection on new generation
+        setSelectedProspecs(new Set(data.results.map((_: any, i: number) => i))); // Select all generated
         setDispatchedIndices(new Set()); // Reset dispatch status on new generation
         confetti({ particleCount: 50, spread: 70 });
       }
@@ -243,6 +246,21 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       setIsGeneratingProspec(false);
     }
   };
+
+  const handleLoadOfficialCatalog = (regionFilter: 'ALL' | 'SP' | 'RJ' | 'MG' | 'BA' | 'Nacional' | 'Internacional' = 'ALL') => {
+    const list = loadCorporateContacts();
+    const filtered = regionFilter === 'ALL' ? list : list.filter(c => c.region === regionFilter);
+    const converted = filtered.map(c => ({
+      name: `${c.name} (${c.region}) - ${c.category || 'Construtora'}`,
+      phone: c.whatsapp,
+      message: `Olá equipe da ${c.name}! Localizamos sua empresa e gostaríamos de convidá-los para acessar a plataforma Mãos em Obra. Temos solicitações de orçamentos, demandas de reformas e oportunidades de subempreitada ativas na sua região. Conheça e receba demandas de obras em: https://maosemobra.app`,
+    }));
+    setProspecResults(converted);
+    setSelectedProspecs(new Set(converted.map((_, i) => i)));
+    setDispatchedIndices(new Set());
+    confetti({ particleCount: 70, spread: 70 });
+  };
+
 
   const toggleAutoWithdraw = async () => {
     try {
@@ -1746,6 +1764,77 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       {/* ======================================================== */}
       {activeSubTab === 'prospec' && (
         <div className="space-y-6">
+          {/* Card Base Oficial de Construtoras (300+ Contatos) */}
+          <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 to-amber-950 border border-amber-500/40 text-white shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-500 text-slate-950 rounded-2xl font-black">
+                  <Send className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <span>Base Oficial: 300+ Construtoras para Disparo em Lote</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-slate-950">
+                      Disparo Imediato
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-300">
+                    Carregue instantaneamente as construtoras cadastradas por região para disparo automático via WhatsApp ou geração de abordagem com IA.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleLoadOfficialCatalog('ALL')}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95 cursor-pointer shrink-0"
+              >
+                <Zap className="w-4 h-4" />
+                <span>Carregar Todas as 300+ Construtoras</span>
+              </button>
+            </div>
+
+            {/* Quick Filter Loaders */}
+            <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-800">
+              <span className="text-[11px] font-bold text-slate-400 uppercase mr-1">Carregar por Região:</span>
+              <button
+                onClick={() => handleLoadOfficialCatalog('SP')}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-xs font-bold transition cursor-pointer"
+              >
+                São Paulo (100)
+              </button>
+              <button
+                onClick={() => handleLoadOfficialCatalog('RJ')}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-xs font-bold transition cursor-pointer"
+              >
+                Rio de Janeiro (37)
+              </button>
+              <button
+                onClick={() => handleLoadOfficialCatalog('MG')}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-xs font-bold transition cursor-pointer"
+              >
+                Minas Gerais (36)
+              </button>
+              <button
+                onClick={() => handleLoadOfficialCatalog('BA')}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-xs font-bold transition cursor-pointer"
+              >
+                Bahia & Nordeste (36)
+              </button>
+              <button
+                onClick={() => handleLoadOfficialCatalog('Nacional')}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-xs font-bold transition cursor-pointer"
+              >
+                Nacional (60)
+              </button>
+              <button
+                onClick={() => handleLoadOfficialCatalog('Internacional')}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-xs font-bold transition cursor-pointer"
+              >
+                Portugal / Int. (41)
+              </button>
+            </div>
+          </div>
+
           <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl">
@@ -1753,7 +1842,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
-                  Gerador de Mensagens de Prospecção B2B com IA
+                  Gerador de Mensagens de Prospecção B2B com IA & Importação Manual
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Cole uma lista de empresas ou estabelecimentos e gere automaticamente mensagens personalizadas de abordagem para o WhatsApp.

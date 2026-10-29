@@ -10,6 +10,7 @@ import { DriveExplorerView } from './components/DriveExplorerView';
 import { TeamSuppliersView } from './components/TeamSuppliersView';
 import { ServiceRequestsView } from './components/ServiceRequestsView';
 import { OpportunitiesView } from './components/OpportunitiesView';
+import { BatchInvitationsView } from './components/BatchInvitationsView';
 import { AdminMasterView } from './components/AdminMasterView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
@@ -413,6 +414,12 @@ export default function App() {
         
         {activeTab === 'opportunities' && (
           <OpportunitiesView />
+        )}
+
+        {activeTab === 'invitations' && (
+          <BatchInvitationsView
+            onNavigateToOpportunities={() => setActiveTab('opportunities')}
+          />
         )}
 
         {activeTab === 'admin' && adminUser && (
