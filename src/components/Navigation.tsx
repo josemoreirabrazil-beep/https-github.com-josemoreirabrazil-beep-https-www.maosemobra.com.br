@@ -52,14 +52,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       badge: 'Vagas & Equipe',
       badgeColor: 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black',
     },
-    {
-      id: 'invitations' as NavTab,
-      label: 'Disparo de Convites',
-      icon: Send,
-      highlight: true,
-      badge: '300+ Empresas',
-      badgeColor: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-black',
-    },
+
     {
       id: 'requests' as NavTab,
       label: 'Solicitações & Logística',
