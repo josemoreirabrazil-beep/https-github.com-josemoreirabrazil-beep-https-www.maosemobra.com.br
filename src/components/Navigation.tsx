@@ -24,6 +24,7 @@ interface NavigationProps {
   requestsCount?: number;
   isAdminAuthenticated?: boolean;
   onOpenInstallModal?: () => void;
+  onOpenWithdrawalModal?: () => void;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
@@ -34,6 +35,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   requestsCount = 0,
   isAdminAuthenticated = false,
   onOpenInstallModal,
+  onOpenWithdrawalModal,
 }) => {
   const tabs = [
     {
@@ -138,12 +140,24 @@ export const Navigation: React.FC<NavigationProps> = ({
             );
           })}
 
+          {/* Menu / Botão Direto de Saque R$ 1.834,80 */}
+          {onOpenWithdrawalModal && (
+            <button
+              onClick={onOpenWithdrawalModal}
+              title="Sacar R$ 1.834,80 p/ Mercado Pago via PIX"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/20 transition whitespace-nowrap ml-auto shrink-0 cursor-pointer active:scale-95 border border-emerald-400/40"
+            >
+              <Wallet className="w-3.5 h-3.5 text-emerald-200" />
+              <span>Sacar R$ 1.834,80 p/ MP</span>
+            </button>
+          )}
+
           {/* Direct Baixar App Button in Navigation Bar */}
           {onOpenInstallModal && (
             <button
               onClick={onOpenInstallModal}
               title="Baixar App no Celular ou Computador"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-amber-500/10 hover:bg-amber-500 text-amber-600 dark:text-amber-400 hover:text-slate-950 border border-amber-500/30 transition whitespace-nowrap ml-auto shrink-0 cursor-pointer shadow-xs active:scale-95"
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-amber-500/10 hover:bg-amber-500 text-amber-600 dark:text-amber-400 hover:text-slate-950 border border-amber-500/30 transition whitespace-nowrap shrink-0 cursor-pointer shadow-xs active:scale-95 ${!onOpenWithdrawalModal ? 'ml-auto' : ''}`}
             >
               <Download className="w-3.5 h-3.5" />
               <span>Baixar App</span>

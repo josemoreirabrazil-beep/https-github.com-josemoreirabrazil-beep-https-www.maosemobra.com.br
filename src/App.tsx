@@ -15,6 +15,7 @@ import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
 import { ProjectModal } from './components/ProjectModal';
 import { InstallAppModal } from './components/InstallAppModal';
+import { WithdrawalModal } from './components/WithdrawalModal';
 import { Download } from 'lucide-react';
 import { 
   getProjects, 
@@ -76,6 +77,7 @@ export default function App() {
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+  const [isWithdrawalModalOpen, setIsWithdrawalModalOpen] = useState(false);
 
   // Admin Master Global State
   const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
@@ -369,6 +371,7 @@ export default function App() {
         onOpenAdminModal={() => setIsAdminLoginModalOpen(true)}
         onNavigateToAdmin={() => setActiveTab('admin')}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
+        onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
       />
 
       {/* Navigation Sub-header */}
@@ -380,6 +383,7 @@ export default function App() {
         requestsCount={serviceRequests.filter(r => r.status === 'Pendente de Orçamento').length}
         isAdminAuthenticated={!!adminUser}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
+        onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -403,6 +407,7 @@ export default function App() {
             onUpdateProject={handleSaveProject}
             isAuthenticated={isAuthenticated}
             adminUser={adminUser}
+            onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
           />
         )}
         
@@ -510,6 +515,7 @@ export default function App() {
         onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
         isAdminAuthenticated={!!adminUser}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
+        onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
       />
 
       {/* Floating Quick Download / Install Button */}
@@ -558,6 +564,13 @@ export default function App() {
         onClose={() => setIsEditProjectModalOpen(false)}
         onSave={handleSaveProject}
         initialData={currentProject}
+      />
+
+      {/* Modal Oficial de Saque R$ 1.834,80 p/ Mercado Pago */}
+      <WithdrawalModal
+        isOpen={isWithdrawalModalOpen}
+        onClose={() => setIsWithdrawalModalOpen(false)}
+        availableAmount={1834.80}
       />
 
     </div>

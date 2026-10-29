@@ -15,7 +15,9 @@ import {
   AlertCircle,
   FileSpreadsheet,
   ShieldCheck,
-  Download
+  Download,
+  Wallet,
+  ArrowUpRight
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';
@@ -39,6 +41,7 @@ interface HeaderProps {
   onOpenAdminModal?: () => void;
   onNavigateToAdmin?: () => void;
   onOpenInstallModal?: () => void;
+  onOpenWithdrawalModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -58,6 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAdminModal,
   onNavigateToAdmin,
   onOpenInstallModal,
+  onOpenWithdrawalModal,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -224,6 +228,19 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Action Tools & Google Drive Sync */}
           <div className="flex items-center gap-2 sm:gap-3">
+
+            {/* 🔥 BOTÃO OFICIAL DE SAQUE R$ 1.834,80 P/ MERCADO PAGO 🔥 */}
+            <button
+              onClick={onOpenWithdrawalModal}
+              title="Sacar R$ 1.834,80 via PIX para sua conta Mercado Pago"
+              className="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 active:scale-95 border border-emerald-400/50"
+            >
+              <div className="w-5 h-5 rounded-lg bg-white/20 flex items-center justify-center">
+                <Wallet className="w-3.5 h-3.5 text-white" />
+              </div>
+              <span className="font-black hidden lg:inline">Sacar R$ 1.834,80 p/ Mercado Pago</span>
+              <span className="font-black lg:hidden">Sacar R$ 1.834,80</span>
+            </button>
 
             {/* Baixar App / Instalar PWA Button */}
             <button

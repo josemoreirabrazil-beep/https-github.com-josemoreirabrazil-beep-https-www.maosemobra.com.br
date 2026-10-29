@@ -34,6 +34,7 @@ interface FooterProps {
   onOpenAdminLogin: () => void;
   isAdminAuthenticated: boolean;
   onOpenInstallModal?: () => void;
+  onOpenWithdrawalModal?: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -46,6 +47,7 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenAdminLogin,
   isAdminAuthenticated,
   onOpenInstallModal,
+  onOpenWithdrawalModal,
 }) => {
   const laborCount = team.filter(m => {
     const isSupplier = m.role.toLowerCase().includes('loja') || m.role.toLowerCase().includes('madeireira') || m.role.toLowerCase().includes('depósito') || m.role.toLowerCase().includes('fornecedor');
@@ -133,6 +135,18 @@ export const Footer: React.FC<FooterProps> = ({
               <Briefcase className="w-3.5 h-3.5 text-amber-500" />
               <span>Oportunidades</span>
             </button>
+
+            {/* Sacar R$ 1.834,80 p/ Mercado Pago Link */}
+            {onOpenWithdrawalModal && (
+              <button
+                onClick={onOpenWithdrawalModal}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black border border-emerald-400/50 transition cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95"
+                title="Sacar R$ 1.834,80 via PIX para o Mercado Pago"
+              >
+                <Wallet className="w-3.5 h-3.5 text-emerald-200" />
+                <span>Sacar R$ 1.834,80 p/ Mercado Pago</span>
+              </button>
+            )}
 
             {/* Baixar App Link */}
             {onOpenInstallModal && (
