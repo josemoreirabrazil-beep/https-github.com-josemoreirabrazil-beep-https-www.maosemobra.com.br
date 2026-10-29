@@ -12,7 +12,8 @@ import {
   Bot, 
   FolderSync, 
   Trash2, 
-  Edit3, 
+  Edit3,
+  RefreshCw,
   Receipt, 
   Store, 
   Calendar, 
@@ -47,6 +48,7 @@ import {
   processMercadoPagoCardPayment,
   batchCreateMercadoPagoPreferences
 } from '../services/mercadoPago';
+import { getBudgetOptimizationSuggestions, type OptimizationResponse } from '../services/ai';
 import confetti from 'canvas-confetti';
 
 interface FinancialViewProps {
@@ -132,6 +134,63 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   const [isSyncingRevenues, setIsSyncingRevenues] = useState(false);
   const [syncResultModal, setSyncResultModal] = useState<{ open: boolean; preferences: Array<any> } | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  // AI Budget Optimization state
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationData, setOptimizationData] = useState<OptimizationResponse | null>(null);
+
+  const handleOptimizeBudget = async () => {
+    setIsOptimizing(true);
+    setOptimizationData(null);
+    try {
+      const data = await getBudgetOptimizationSuggestions(project, expenses);
+      setOptimizationData(data);
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    } catch (err: any) {
+      alert(err.message || 'Erro ao gerar otimização de orçamento');
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  const applyOptimization = (suggestion: any) => {
+    if (suggestion.expenseId) {
+      const targetExp = expenses.find(e => e.id === suggestion.expenseId);
+      if (targetExp) {
+        onSaveExpense({
+          ...targetExp,
+          plannedAmount: suggestion.suggestedAmount,
+          actualAmount: targetExp.status === 'Pago' ? targetExp.actualAmount : suggestion.suggestedAmount,
+          notes: `${targetExp.notes || ''}\n[IA Optimization]: ${suggestion.justification}`.trim()
+        });
+      }
+    } else {
+      // Create new economy entry
+      const economyExp: Expense = {
+        id: `opt-eco-${Date.now()}`,
+        projectId: project.id,
+        description: `Economia: ${suggestion.title}`,
+        category: 'Outros',
+        type: 'Receita', // Injected as positive to represent savings in balance
+        plannedAmount: suggestion.savings,
+        actualAmount: suggestion.savings,
+        status: 'Pago',
+        date: new Date().toISOString().split('T')[0],
+        supplier: 'Otimização IA',
+      };
+      onSaveExpense(economyExp);
+    }
+    
+    // Remove suggestion from list after applying
+    if (optimizationData) {
+      setOptimizationData({
+        ...optimizationData,
+        suggestions: optimizationData.suggestions.filter(s => s.id !== suggestion.id)
+      });
+    }
+    
+    confetti({ particleCount: 40, spread: 50 });
+  };
 
   const handleSendRevenuesToMercadoPago = async () => {
     const pendingIncomes = incomeTransactions.filter(e => e.status !== 'Pago');
@@ -588,6 +647,16 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Budget Optimization IA Button */}
+          <button
+            onClick={handleOptimizeBudget}
+            disabled={isOptimizing}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 rounded-xl shadow-xs transition border border-slate-700"
+          >
+            {isOptimizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4 text-purple-400" />}
+            <span>Otimizar Orçamento (IA)</span>
+          </button>
+
           {/* Proposal Generator Button */}
           <button
             onClick={() => setIsProposalModalOpen(true)}
@@ -780,6 +849,62 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
         </div>
       </div>
 
+      {/* 🚀 AI Budget Optimization Suggestions Section */}
+      {optimizationData && optimizationData.suggestions.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl animate-in fade-in slide-in-from-top-4 duration-500">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-purple-500/20 text-purple-400 rounded-2xl border border-purple-500/30">
+                <Bot className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Sugestões de Otimização IA</h3>
+                <p className="text-xs text-slate-400">{optimizationData.globalStrategy}</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setOptimizationData(null)}
+              className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition"
+            >
+              Fechar Sugestões
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {optimizationData.suggestions.map((suggestion) => (
+              <div 
+                key={suggestion.id}
+                className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col justify-between group hover:border-purple-500/50 transition-all"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="text-xs font-black text-white leading-tight">{suggestion.title}</h4>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase border border-emerald-500/30 whitespace-nowrap">
+                      Economia R$ {suggestion.savings.toLocaleString('pt-BR')}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed italic">"{suggestion.description}"</p>
+                  <p className="text-[10px] text-slate-500 leading-snug">{suggestion.justification}</p>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
+                  <div className="text-[10px]">
+                    <span className="text-slate-500 block">De R$ {suggestion.originalAmount?.toLocaleString('pt-BR')}</span>
+                    <span className="text-emerald-400 font-black">Por R$ {suggestion.suggestedAmount.toLocaleString('pt-BR')}</span>
+                  </div>
+                  <button
+                    onClick={() => applyOptimization(suggestion)}
+                    className="px-3 py-1.5 bg-white hover:bg-purple-500 hover:text-white text-slate-950 font-bold rounded-xl text-[10px] transition-all shadow-sm active:scale-95"
+                  >
+                    Aplicar Economia
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Filter, Search Bar & Quick Actions */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="relative flex-1 w-full">
@@ -931,6 +1056,24 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
                           mp
                         </div>
                       </button>
+
+                      {exp.status !== 'Pago' && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const { simulateMercadoPagoWebhook } = await import('../services/payment');
+                              await simulateMercadoPagoWebhook(exp.id, 'approved');
+                              alert('Webhook Simulado enviado com sucesso! O status será atualizado em instantes pelo Observador Master.');
+                            } catch (e) {
+                              alert('Erro ao simular webhook.');
+                            }
+                          }}
+                          className="p-1.5 text-amber-500 hover:bg-amber-500/10 rounded-lg transition"
+                          title="Simular Aprovação via Webhook (Teste)"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
 
                       <button
                         onClick={() => handleStartEdit(exp)}

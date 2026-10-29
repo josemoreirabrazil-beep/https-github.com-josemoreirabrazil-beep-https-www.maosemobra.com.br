@@ -120,7 +120,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'cashflow' | 'shield' | 'database' | 'logs' | 'users'>('cashflow');
+  const [activeSubTab, setActiveSubTab] = useState<'cashflow' | 'shield' | 'database' | 'logs' | 'users' | 'prospec'>('cashflow');
 
   // Subscribers Cashflow & Billing State
   const [subscriberPayments, setSubscriberPayments] = useState<SubscriberPayment[]>([]);
@@ -169,6 +169,36 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [withdrawalResultModal, setWithdrawalResultModal] = useState<any | null>(null);
   const [autoWithdrawEnabled, setAutoWithdrawEnabled] = useState<boolean>(true);
+
+  // B2B Prospecção State
+  const [prospecInput, setProspecInput] = useState('');
+  const [prospecResults, setProspecResults] = useState<{ name: string; message: string }[]>([]);
+  const [isGeneratingProspec, setIsGeneratingProspec] = useState(false);
+
+  const handleGenerateProspec = async () => {
+    if (!prospecInput.trim()) return;
+    setIsGeneratingProspec(true);
+    try {
+      const response = await fetch('/api/ai/generate-prospec', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminUser.token}`
+        },
+        body: JSON.stringify({ input: prospecInput }),
+      });
+      const data = await response.json();
+      if (data.results) {
+        setProspecResults(data.results);
+        confetti({ particleCount: 50, spread: 70 });
+      }
+    } catch (err) {
+      console.error('Failed to generate prospec messages', err);
+      alert('Erro ao gerar mensagens de prospecção.');
+    } finally {
+      setIsGeneratingProspec(false);
+    }
+  };
 
   const toggleAutoWithdraw = async () => {
     try {
@@ -747,6 +777,18 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         >
           <Users className="w-4 h-4" />
           <span>Visão Geral de Inscritos & Obras</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('prospec')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'prospec'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <Briefcase className="w-4 h-4" />
+          <span>Prospecção B2B (IA)</span>
         </button>
       </div>
 
@@ -1652,6 +1694,103 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 🤝 TAB 6: PROSPECÇÃO B2B (IA) */}
+      {/* ======================================================== */}
+      {activeSubTab === 'prospec' && (
+        <div className="space-y-6">
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl">
+                <Briefcase className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                  Gerador de Mensagens de Prospecção B2B com IA
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Cole uma lista de empresas ou estabelecimentos e gere automaticamente mensagens personalizadas de abordagem para o WhatsApp.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-[11px] font-black text-slate-400 uppercase tracking-widest px-1">Lista de Empresas / Dados Brutos</label>
+              <textarea
+                rows={8}
+                value={prospecInput}
+                onChange={(e) => setProspecInput(e.target.value)}
+                placeholder="Cole aqui o nome dos estabelecimentos, endereços ou qualquer texto que contenha a lista de empresas..."
+                className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all text-xs font-medium"
+              />
+              <div className="flex justify-end">
+                <button
+                  onClick={handleGenerateProspec}
+                  disabled={isGeneratingProspec || !prospecInput.trim()}
+                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-md transition cursor-pointer disabled:opacity-50"
+                >
+                  {isGeneratingProspec ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Gerando Mensagens...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>Gerar Abordagens IA</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {prospecResults.length > 0 && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 flex items-center justify-between">
+                <span>Resultados Gerados ({prospecResults.length})</span>
+                <button 
+                  onClick={() => setProspecResults([])}
+                  className="text-rose-500 hover:underline lowercase"
+                >
+                  Limpar Resultados
+                </button>
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {prospecResults.map((res, idx) => (
+                  <div key={idx} className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs group hover:border-amber-500/50 transition-all">
+                    <div className="flex items-center justify-between mb-2">
+                      <h5 className="text-sm font-black text-slate-900 dark:text-white">{res.name}</h5>
+                      <button 
+                        onClick={() => handleCopy(res.message, `msg-${idx}`)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-500/10 transition-all"
+                        title="Copiar Mensagem"
+                      >
+                        {copiedKey === `msg-${idx}` ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed italic">
+                      "{res.message}"
+                    </p>
+                    <div className="mt-4 flex items-center gap-2">
+                      <a 
+                        href={`https://wa.me/?text=${encodeURIComponent(res.message)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-[10px] text-center flex items-center justify-center gap-1.5 transition shadow-sm"
+                      >
+                        <Phone className="w-3 h-3" />
+                        <span>Abrir no WhatsApp</span>
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -81,6 +81,7 @@ export interface Expense {
   invoiceNumber?: string;
   receiptUrl?: string;
   driveReceiptFileId?: string;
+  notes?: string;
 }
 
 export interface ChecklistItem {

@@ -102,6 +102,50 @@ export default function App() {
     setGoals(loadGoals(currentProject.id));
   }, [currentProjectId]);
 
+  // 🔄 Background Automated Payment Sync (Observador Master)
+  useEffect(() => {
+    const pendingExpenses = expenses.filter(e => e.status !== 'Pago');
+    if (pendingExpenses.length === 0) return;
+
+    const interval = setInterval(async () => {
+      let updatedAny = false;
+      const newExpenses = [...expenses];
+
+      for (let i = 0; i < newExpenses.length; i++) {
+        const exp = newExpenses[i];
+        if (exp.status === 'Pago') continue;
+
+        try {
+          // Check if this specific reference was approved in the server's realTimePaymentStatuses
+          const response = await fetch(`/api/mercadopago/payment-status/${exp.id}`);
+          const data = await response.json();
+
+          if (data.found && data.status === 'approved') {
+            newExpenses[i] = {
+              ...exp,
+              status: 'Pago',
+              actualAmount: data.amount || exp.actualAmount || exp.plannedAmount,
+              invoiceNumber: exp.invoiceNumber || `AUTO-MP-${Date.now()}`,
+              supplier: exp.supplier ? `${exp.supplier} (Sync)` : 'Mercado Pago (Auto)',
+              date: new Date().toISOString().split('T')[0]
+            };
+            updatedAny = true;
+          }
+        } catch (e) {
+          // Silent fail for background poll
+        }
+      }
+
+      if (updatedAny) {
+        setExpenses(newExpenses);
+        saveExpenses(currentProject.id, newExpenses);
+        confetti({ particleCount: 30, spread: 50, origin: { y: 0.8 } });
+      }
+    }, 10000); // Check every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [expenses, currentProject.id]);
+
   // Tab change handler with Admin intercept and optional team filter
   const handleTabChange = (tab: NavTab, categoryFilter?: 'all' | 'labor' | 'supplier' | 'technical') => {
     if (categoryFilter) {

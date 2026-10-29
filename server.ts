@@ -1060,48 +1060,61 @@ app.get('/api/mercadopago/check-payment/:id', async (req, res) => {
 // Mercado Pago: Webhook IPN Listener
 app.post('/api/mercadopago/webhook', async (req, res) => {
   try {
-    const { type, data, action } = req.body;
-    console.log(`[Mercado Pago Webhook] Received notification: type=${type}, action=${action}`, data);
+    const { type, data, action, simulatedStatus } = req.body;
+    console.log(`[Mercado Pago Webhook] Received notification: type=${type}, action=${action}, simulatedStatus=${simulatedStatus}`, data);
 
     if ((type === 'payment' || action?.includes('payment')) && data?.id) {
       const mpClient = getMercadoPagoClient();
-      if (mpClient) {
+      let status = simulatedStatus || 'pending';
+      let statusDetail = 'waiting_payment';
+      let externalRef = `sim-${data.id}`;
+      let amount = 0;
+
+      if (mpClient && !data.id.startsWith('demo')) {
         const payment = new Payment(mpClient);
         const paymentData = await payment.get({ id: data.id });
-        const externalRef = paymentData.external_reference;
-        const status = paymentData.status;
-        const statusDetail = paymentData.status_detail;
+        externalRef = paymentData.external_reference;
+        status = paymentData.status;
+        statusDetail = paymentData.status_detail;
+        amount = paymentData.transaction_amount;
+      } else if (simulatedStatus) {
+        // Use provided simulated status
+        status = simulatedStatus;
+        statusDetail = 'accredited';
+        externalRef = data.external_reference || data.id;
+        amount = data.amount || 0;
+      }
 
-        console.log(`[Mercado Pago Webhook] Payment ${paymentData.id} status is ${status} (Ref: ${externalRef})`);
+      console.log(`[Mercado Pago Webhook] Payment ${data.id} status is ${status} (Ref: ${externalRef})`);
 
-        if (externalRef) {
-          // Update real-time status map for client polling
-          realTimePaymentStatuses.set(externalRef, {
-            status,
-            statusDetail,
-            amount: paymentData.transaction_amount,
-            updatedAt: Date.now(),
-          });
+      if (externalRef) {
+        // Update real-time status map for client polling
+        realTimePaymentStatuses.set(externalRef, {
+          status,
+          statusDetail,
+          amount,
+          updatedAt: Date.now(),
+        });
 
-          // If it's an approved subscriber payment, update the list
-          if (status === 'approved') {
-            const subIdx = subscriberPayments.findIndex(p => p.id === externalRef || p.transactionId === externalRef);
-            if (subIdx !== -1) {
-              subscriberPayments[subIdx].status = 'Aprovado';
-              subscriberPayments[subIdx].paymentDate = new Date().toISOString().split('T')[0];
-              recordAuditLog('CONFIG_CHANGE', 'INFO', 'SYSTEM', `Assinatura ${subscriberPayments[subIdx].subscriberName} aprovada automaticamente via Webhook.`);
-            }
+        // If it's an approved payment, update internal states
+        if (status === 'approved' || status === 'accredited') {
+          // Update subscriber payments list if match
+          const subIdx = subscriberPayments.findIndex(p => p.id === externalRef || p.transactionId === externalRef);
+          if (subIdx !== -1) {
+            subscriberPayments[subIdx].status = 'Aprovado';
+            subscriberPayments[subIdx].paymentDate = new Date().toISOString().split('T')[0];
+            recordAuditLog('CONFIG_CHANGE', 'INFO', 'SYSTEM', `Assinatura ${subscriberPayments[subIdx].subscriberName} aprovada automaticamente via Webhook.`);
+          }
 
-            // 🚀 AUTOMATION: If auto-withdraw is enabled, transfer the amount immediately
-            if (autoWithdrawEnabled && paymentData.transaction_amount > 0) {
-              performAutomaticTransfer(paymentData.transaction_amount, `Recebimento Ref: ${externalRef}`);
-            }
+          // 🚀 AUTOMATION: If auto-withdraw is enabled, transfer the amount immediately
+          if (autoWithdrawEnabled && amount > 0) {
+            performAutomaticTransfer(amount, `Recebimento Ref: ${externalRef}`);
           }
         }
       }
     }
 
-    return res.status(200).send('OK');
+    return res.status(200).json({ success: true, message: 'Webhook processed' });
   } catch (error: any) {
     console.error('Error in Mercado Pago Webhook:', error);
     return res.status(200).send('Webhook handled with error');
@@ -1187,14 +1200,21 @@ app.post('/api/ai/generate-checklist', async (req, res) => {
 
     const prompt = `Como engenheiro civil experiente em gestão de obras, gere uma lista de tarefas críticas de "Pré-Obra" para o seguinte tipo de projeto: "${projectType}".
 
+    É OBRIGATÓRIO incluir itens relacionados a:
+    1. Verificação de alvarás e licenciamento (Prefeitura, Bombeiros, etc).
+    2. Segurança do canteiro (EPIs, sinalização, isolamento, NR-18).
+    3. Locação de equipamentos (caçambas, andaimes, betoneiras).
+    4. Mobilização técnica (ligação de luz/água, instalações provisórias).
+    5. Conferência de projetos e especificações.
+
     Retorne um JSON com o seguinte formato:
     {
       "checklist": [
-        { "id": "1", "task": "Descrição da tarefa", "completed": false }
+        { "id": "uuid-1", "text": "Descrição da tarefa", "done": false }
       ]
     }
     
-    Certifique-se de que as tarefas sejam relevantes, práticas e seguem normas de segurança e qualidade brasileiras (como NR-18, ABNT).`;
+    Certifique-se de que as tarefas sejam relevantes, práticas e seguem normas de segurança e qualidade brasileiras. Gere pelo menos 10 itens.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.7-flash',
@@ -1206,7 +1226,16 @@ app.post('/api/ai/generate-checklist', async (req, res) => {
 
     let checklistData = { checklist: [] };
     try {
-      checklistData = JSON.parse(response.text || '{"checklist": []}');
+      const parsed = JSON.parse(response.text || '{"checklist": []}');
+      if (parsed.checklist && Array.isArray(parsed.checklist)) {
+        // Ensure IDs are unique and keys are correct
+        checklistData.checklist = parsed.checklist.map((item: any, index: number) => ({
+          id: item.id || `ai-chk-${Date.now()}-${index}`,
+          text: item.text || item.task || 'Tarefa sem descrição',
+          done: item.done || item.completed || false,
+          deadline: item.deadline || undefined
+        }));
+      }
     } catch (e) {
       console.error('Failed to parse AI response', e);
     }
@@ -1379,6 +1408,188 @@ Retorne um JSON com a seguinte estrutura:
   } catch (error: any) {
     console.error('Error in /api/ai/analyze-receipt:', error);
     return res.status(500).json({ error: error.message || 'Erro ao processar recibo' });
+  }
+});
+
+// AI B2B Prospecção Message Generation
+app.post('/api/ai/generate-prospec', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+    if (!token || !verifyMasterToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { input } = req.body;
+    if (!input) return res.status(400).json({ error: 'Input is required' });
+
+    const ai = getGeminiClient();
+    const prompt = `Você é um especialista em prospecção comercial B2B para o setor da construção civil no Brasil. 
+    Para cada empresa/estabelecimento fornecido no texto abaixo, gere uma mensagem curta de abordagem para o WhatsApp com EXATAMENTE 2 a 3 frases.
+    O objetivo é convidar o responsável por compras a conhecer nossa plataforma de automação "Mãos em Obra", que facilita a gestão de pedidos e faturamento.
+    Seja extremamente profissional, direto e use um tom amigável.
+    
+    Texto de Entrada:
+    ${input}
+    
+    Retorne um JSON com o seguinte formato:
+    {
+      "results": [
+        { "name": "Nome da Empresa", "message": "Texto da mensagem comercial aqui..." }
+      ]
+    }`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.7-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
+
+    let results = { results: [] };
+    try {
+      results = JSON.parse(response.text || '{"results": []}');
+    } catch (e) {
+      console.error('Failed to parse prospec response', e);
+    }
+
+    return res.json(results);
+  } catch (error: any) {
+    console.error('Error in /api/ai/generate-prospec:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao gerar prospecção' });
+  }
+});
+
+// AI Predictive Analysis for Budget and Timeline
+app.post('/api/ai/predictive-analysis', async (req, res) => {
+  try {
+    const { project, expenses, phases } = req.body;
+    if (!project) return res.status(400).json({ error: 'Project data is required' });
+
+    const ai = getGeminiClient();
+    
+    const prompt = `Como um experiente Gerente de Projetos de Construção Civil e Engenheiro Orçamentista, analise os seguintes dados da obra e emita um diagnóstico preditivo de riscos.
+
+    DADOS DO PROJETO:
+    - Título: ${project.title}
+    - Orçamento Total Previsto: R$ ${project.budgetTotal}
+    - Data de Início: ${project.startDate}
+    - Data Estimada de Término: ${project.estimatedEndDate}
+    - Status Atual: ${project.status}
+
+    EXTRATO FINANCEIRO (DESPESAS):
+    ${JSON.stringify(expenses.map((e: any) => ({ desc: e.description, planned: e.plannedAmount, actual: e.actualAmount, status: e.status, category: e.category })))}
+
+    CRONOGRAMA (FASES):
+    ${JSON.stringify(phases.map((p: any) => ({ title: p.title, start: p.startDate, end: p.endDate, progress: p.progressPercentage, status: p.status })))}
+
+    Com base na velocidade atual de execução (progresso das fases vs tempo decorrido) e no ritmo de gastos (valor realizado vs planejado), forneça:
+    1. Uma análise de "Risco de Atraso" (Baixo, Médio, Alto).
+    2. Uma análise de "Risco de Estouro de Orçamento" (Baixo, Médio, Alto).
+    3. Justificativa baseada nos dados.
+    4. Sugestão prática para mitigar os riscos detectados.
+
+    Retorne APENAS um JSON com o seguinte formato:
+    {
+      "delayRisk": "Baixo" | "Médio" | "Alto",
+      "budgetRisk": "Baixo" | "Médio" | "Alto",
+      "summary": "Breve resumo técnico (máx 3 frases)",
+      "recommendation": "Sugestão técnica para o gestor",
+      "projectedCompletion": "YYYY-MM-DD",
+      "projectedTotalCost": 0.00
+    }`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.7-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
+
+    let analysis = {
+      delayRisk: 'Baixo',
+      budgetRisk: 'Baixo',
+      summary: 'Dados insuficientes para análise profunda.',
+      recommendation: 'Continue alimentando os RDOs e despesas.',
+      projectedCompletion: project.estimatedEndDate,
+      projectedTotalCost: project.budgetTotal
+    };
+
+    try {
+      analysis = JSON.parse(response.text || '{}');
+    } catch (e) {
+      console.error('Failed to parse AI predictive analysis', e);
+    }
+
+    return res.json(analysis);
+  } catch (error: any) {
+    console.error('Error in /api/ai/predictive-analysis:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao gerar análise preditiva' });
+  }
+});
+
+// AI Budget Optimization Suggestions
+app.post('/api/ai/optimize-budget', async (req, res) => {
+  try {
+    const { project, expenses } = req.body;
+    if (!project || !expenses) {
+      return res.status(400).json({ error: 'Project and expenses data are required' });
+    }
+
+    const ai = getGeminiClient();
+
+    const prompt = `Como um consultor sênior de engenharia e gestão financeira de obras, analise a lista de despesas e o orçamento total do projeto abaixo.
+    Seu objetivo é identificar gastos excessivos, sugerir economias e otimizar a alocação de recursos.
+
+    PROJETO:
+    - Título: ${project.title}
+    - Orçamento Total: R$ ${project.budgetTotal}
+    - Notas: ${project.notes || 'Sem notas'}
+
+    DESPESAS ATUAIS:
+    ${JSON.stringify(expenses.map((e: any) => ({ id: e.id, desc: e.description, cat: e.category, planned: e.plannedAmount, actual: e.actualAmount, status: e.status })))}
+
+    Considere:
+    - Gastos desproporcionais em relação ao orçamento total.
+    - Oportunidades de negociação com fornecedores ou mudança de marcas/materiais.
+    - Priorização de etapas críticas.
+
+    Retorne um JSON com o seguinte formato:
+    {
+      "globalStrategy": "Breve parágrafo com a estratégia geral de economia recomendada.",
+      "suggestions": [
+        {
+          "id": "opt-1",
+          "expenseId": "id-da-despesa-original",
+          "title": "Título curto da sugestão",
+          "description": "Explicação detalhada da otimização",
+          "originalAmount": 1000.00,
+          "suggestedAmount": 850.00,
+          "savings": 150.00,
+          "justification": "Por que esta economia é possível?"
+        }
+      ]
+    }`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.7-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
+
+    let result = { suggestions: [], globalStrategy: '' };
+    try {
+      result = JSON.parse(response.text || '{"suggestions": [], "globalStrategy": ""}');
+    } catch (e) {
+      console.error('Failed to parse optimization response', e);
+    }
+
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error in /api/ai/optimize-budget:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao gerar otimização de orçamento' });
   }
 });
 

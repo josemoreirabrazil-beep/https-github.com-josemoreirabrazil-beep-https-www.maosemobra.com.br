@@ -25,7 +25,8 @@ import {
   ShieldCheck,
   QrCode,
   Sparkles,
-  Loader2
+  Loader2,
+  Activity
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal } from '../types';
 import type { NavTab } from './Navigation';
@@ -134,12 +135,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [isMpModalOpen, setIsMpModalOpen] = useState(false);
   const [mpRefId, setMpRefId] = useState<string>('');
   const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
+  const [isAnalyzingRisks, setIsAnalyzingRisks] = useState(false);
+  const [riskAnalysis, setRiskAnalysis] = useState<any>(null);
   
   const handleOpenMpModal = () => {
     setMpRefId(`dash-${project.id}-${Date.now()}`);
     setIsMpModalOpen(true);
   };
   const [selectedChecklistType, setSelectedChecklistType] = useState(project.type || 'Reforma Residencial');
+
+  const generatePredictiveAnalysis = async () => {
+    try {
+      setIsAnalyzingRisks(true);
+      const response = await fetch('/api/ai/predictive-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project, expenses, phases }),
+      });
+      const data = await response.json();
+      setRiskAnalysis(data);
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    } catch (e) {
+      console.error('Erro ao gerar análise preditiva', e);
+      alert('Erro ao realizar análise preditiva com IA.');
+    } finally {
+      setIsAnalyzingRisks(false);
+    }
+  };
 
   const generateChecklist = async () => {
     try {
@@ -524,6 +546,133 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           ) : (
             <div className="p-4 bg-white/60 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-500">
               Nenhum checklist gerado para este projeto ainda. Selecione o tipo de obra acima e clique em <strong>"Gerar Checklist Pré-Obra"</strong> para acionar a inteligência artificial.
+            </div>
+          )}
+        </div>
+
+        {/* 🧠 AI Predictive Risk Analysis Section */}
+        <div className="mt-6 p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl overflow-hidden relative group">
+          <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-amber-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/20 transition-all duration-700"></div>
+          
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shadow-lg shadow-amber-500/20">
+                <TrendingUp className="w-7 h-7" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  Análise Preditiva de Riscos IA
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase border border-emerald-500/30">
+                    Ativada
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Cruzamento de dados entre cronograma (progresso real) e ritmo financeiro para prever atrasos ou estouros.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={generatePredictiveAnalysis}
+              disabled={isAnalyzingRisks}
+              className="px-6 py-3 bg-white hover:bg-slate-100 text-slate-950 font-black rounded-2xl text-xs flex items-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+            >
+              {isAnalyzingRisks ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Processando Telemetria IA...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span>Realizar Diagnóstico Preditivo</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {riskAnalysis ? (
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              {/* Delay Risk */}
+              <div className="p-5 rounded-2xl bg-white/5 border border-white/10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Risco de Atraso</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                    riskAnalysis.delayRisk === 'Alto' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                    riskAnalysis.delayRisk === 'Médio' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                    'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  }`}>
+                    {riskAnalysis.delayRisk}
+                  </span>
+                </div>
+                <div className="text-white text-xs font-medium leading-relaxed">
+                  Término Projetado: <strong className="text-amber-400">{new Date(riskAnalysis.projectedCompletion).toLocaleDateString('pt-BR')}</strong>
+                </div>
+                <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${
+                      riskAnalysis.delayRisk === 'Alto' ? 'bg-rose-500' :
+                      riskAnalysis.delayRisk === 'Médio' ? 'bg-amber-500' :
+                      'bg-emerald-500'
+                    }`}
+                    style={{ width: riskAnalysis.delayRisk === 'Alto' ? '85%' : riskAnalysis.delayRisk === 'Médio' ? '50%' : '15%' }}
+                  />
+                </div>
+              </div>
+
+              {/* Budget Risk */}
+              <div className="p-5 rounded-2xl bg-white/5 border border-white/10 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Risco Orçamentário</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                    riskAnalysis.budgetRisk === 'Alto' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                    riskAnalysis.budgetRisk === 'Médio' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                    'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  }`}>
+                    {riskAnalysis.budgetRisk}
+                  </span>
+                </div>
+                <div className="text-white text-xs font-medium leading-relaxed">
+                  Custo Final Projetado: <strong className="text-amber-400">R$ {Number(riskAnalysis.projectedTotalCost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+                </div>
+                <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full ${
+                      riskAnalysis.budgetRisk === 'Alto' ? 'bg-rose-500' :
+                      riskAnalysis.budgetRisk === 'Médio' ? 'bg-amber-500' :
+                      'bg-emerald-500'
+                    }`}
+                    style={{ width: riskAnalysis.budgetRisk === 'Alto' ? '90%' : riskAnalysis.budgetRisk === 'Médio' ? '60%' : '20%' }}
+                  />
+                </div>
+              </div>
+
+              {/* Summary & Recommendation */}
+              <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 md:col-span-2 lg:col-span-1 space-y-3">
+                <div className="flex items-center gap-2 text-[10px] font-black text-amber-400 uppercase tracking-widest">
+                  <Bot className="w-4 h-4" />
+                  Diagnóstico IA
+                </div>
+                <p className="text-[11px] text-slate-300 font-medium leading-relaxed">
+                  {riskAnalysis.summary}
+                </p>
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Recomendação Master</div>
+                  <p className="text-[11px] text-emerald-400 font-bold leading-snug">
+                    {riskAnalysis.recommendation}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-8 p-6 rounded-2xl border border-dashed border-white/10 bg-white/5 text-center space-y-3">
+              <Activity className="w-10 h-10 text-white/20 mx-auto" />
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-slate-400">Nenhum diagnóstico preditivo gerado</p>
+                <p className="text-[10px] text-slate-500 max-w-sm mx-auto">
+                  Clique no botão acima para que a IA analise o ritmo de gastos e o progresso das fases para identificar riscos precocemente.
+                </p>
+              </div>
             </div>
           )}
         </div>
