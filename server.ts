@@ -515,6 +515,316 @@ let subscriberPayments: Array<{
   }
 ];
 
+// Model for Client and Provider Receipts (Tracked and auto-updated via Mercado Pago Webhooks)
+export interface ClientProviderReceipt {
+  id: string;
+  category: 'cliente' | 'prestador';
+  partyName: string;
+  partyEmail: string;
+  partyPhone?: string;
+  partyCpfCnpj?: string;
+  description: string;
+  projectName?: string;
+  amount: number;
+  method: 'PIX' | 'Cartão de Crédito' | 'Mercado Pago' | 'Boleto';
+  status: 'Pendente' | 'Aprovado' | 'Rejeitado' | 'Cancelado' | 'Reembolsado';
+  referenceId: string;
+  mpPaymentId?: string;
+  paymentDate?: string;
+  dueDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastWebhookAt?: string;
+  notes?: string;
+}
+
+let clientAndProviderReceipts: ClientProviderReceipt[] = [
+  // Recebimentos de Clientes (Aportes, Entradas, Taxas de Projeto)
+  {
+    id: 'REC-CLI-001',
+    category: 'cliente',
+    partyName: 'Dra. Mariana Sampaio',
+    partyEmail: 'mariana.sampaio@adv.com.br',
+    partyPhone: '(73) 99201-1122',
+    partyCpfCnpj: '382.910.428-11',
+    description: 'Entrada / Aporte de Obra Reforma Jardins',
+    projectName: 'Reforma Residencial Jardins',
+    amount: 5000.00,
+    method: 'PIX',
+    status: 'Pendente',
+    referenceId: 'REF-CLI-REFORMA-001',
+    dueDate: '2026-11-05',
+    createdAt: '2026-10-28T14:30:00.000Z',
+    updatedAt: '2026-10-28T14:30:00.000Z',
+    notes: 'Aguardando compensação do sinal via Mercado Pago PIX.',
+  },
+  {
+    id: 'REC-CLI-002',
+    category: 'cliente',
+    partyName: 'Roberto Albuquerque',
+    partyEmail: 'roberto.albuquerque@gmail.com',
+    partyPhone: '(73) 98822-4411',
+    partyCpfCnpj: '419.827.102-55',
+    description: 'Aporte Etapa 1 - Fundação e Alvenaria',
+    projectName: 'Construção Sobrado Litoral Sul',
+    amount: 3500.00,
+    method: 'Mercado Pago',
+    status: 'Aprovado',
+    referenceId: 'REF-CLI-SOBRADO-002',
+    mpPaymentId: 'MP-9812401827',
+    paymentDate: '2026-10-27',
+    dueDate: '2026-10-27',
+    createdAt: '2026-10-26T10:00:00.000Z',
+    updatedAt: '2026-10-27T11:15:00.000Z',
+    lastWebhookAt: '2026-10-27T11:15:00.000Z',
+    notes: 'Pago via Checkout Mercado Pago e creditado automaticamente.',
+  },
+  {
+    id: 'REC-CLI-003',
+    category: 'cliente',
+    partyName: 'Condomínio Edifício Mirante',
+    partyEmail: 'sindico@edificiomirante.com.br',
+    partyPhone: '(73) 3211-9080',
+    partyCpfCnpj: '14.882.109/0001-32',
+    description: 'Taxa de Intermediação Laudo Estrutural Fachada',
+    projectName: 'Reforma de Fachada Mirante',
+    amount: 450.00,
+    method: 'PIX',
+    status: 'Aprovado',
+    referenceId: 'REF-CLI-LAUDO-003',
+    mpPaymentId: 'MP-4482910291',
+    paymentDate: '2026-10-28',
+    dueDate: '2026-10-28',
+    createdAt: '2026-10-28T09:00:00.000Z',
+    updatedAt: '2026-10-28T09:05:00.000Z',
+    lastWebhookAt: '2026-10-28T09:05:00.000Z',
+    notes: 'Aprovado via Webhook PIX Mercado Pago.',
+  },
+
+  // Recebimentos de Prestadores (Taxas de Proposta, Planos, Anúncios)
+  {
+    id: 'REC-PREST-001',
+    category: 'prestador',
+    partyName: 'Mestre Valdir Ramos (Alvenaria & Acabamentos)',
+    partyEmail: 'valdir.mestre.obras@gmail.com',
+    partyPhone: '(73) 98133-7766',
+    partyCpfCnpj: '592.110.492-30',
+    description: 'Taxa de Envio de Proposta Comercial Obra 14',
+    projectName: 'Reforma Comercial Centro',
+    amount: 45.00,
+    method: 'PIX',
+    status: 'Pendente',
+    referenceId: 'REF-PREST-PROP-001',
+    dueDate: '2026-11-02',
+    createdAt: '2026-10-29T08:00:00.000Z',
+    updatedAt: '2026-10-29T08:00:00.000Z',
+    notes: 'Aguardando validação do pagamento da proposta pelo Mercado Pago.',
+  },
+  {
+    id: 'REC-PREST-002',
+    category: 'prestador',
+    partyName: 'Eng. Carlos Eduardo Martins',
+    partyEmail: 'carlos.martins.eng@gmail.com',
+    partyPhone: '(73) 99123-4567',
+    partyCpfCnpj: '284.991.029-44',
+    description: 'Assinatura Mensal Pro - Gestão & RDO Ilimitado',
+    amount: 149.90,
+    method: 'PIX',
+    status: 'Aprovado',
+    referenceId: 'sub-pay-001',
+    mpPaymentId: 'MP-7749102831',
+    paymentDate: '2026-10-25',
+    dueDate: '2026-10-25',
+    createdAt: '2026-10-25T14:00:00.000Z',
+    updatedAt: '2026-10-25T14:02:00.000Z',
+    lastWebhookAt: '2026-10-25T14:02:00.000Z',
+    notes: 'Renovação aprovada via Webhook e transferida p/ conta Master.',
+  },
+  {
+    id: 'REC-PREST-003',
+    category: 'prestador',
+    partyName: 'Elétrica & Automação Santos',
+    partyEmail: 'contato@eletricasantos.com.br',
+    partyPhone: '(73) 99188-4455',
+    partyCpfCnpj: '18.992.301/0001-89',
+    description: 'Taxa de Acesso ao Painel de Oportunidades & Cotações',
+    amount: 89.00,
+    method: 'Mercado Pago',
+    status: 'Aprovado',
+    referenceId: 'REF-PREST-OPP-003',
+    mpPaymentId: 'MP-1192840192',
+    paymentDate: '2026-10-28',
+    dueDate: '2026-10-28',
+    createdAt: '2026-10-28T16:20:00.000Z',
+    updatedAt: '2026-10-28T16:22:00.000Z',
+    lastWebhookAt: '2026-10-28T16:22:00.000Z',
+    notes: 'Taxa aprovada via Cartão de Crédito e repassada via PIX.',
+  },
+  {
+    id: 'REC-PREST-004',
+    category: 'prestador',
+    partyName: 'Topografia & Sondagem Litoral',
+    partyEmail: 'financeiro@topografialitoral.com.br',
+    partyPhone: '(73) 98877-0099',
+    partyCpfCnpj: '09.342.109/0001-44',
+    description: 'Renovação Mensal Pro Setembro',
+    amount: 149.90,
+    method: 'PIX',
+    status: 'Pendente',
+    referenceId: 'sub-pay-006',
+    dueDate: '2026-11-03',
+    createdAt: '2026-10-29T09:10:00.000Z',
+    updatedAt: '2026-10-29T09:10:00.000Z',
+    notes: 'Cobrança PIX gerada no Mercado Pago, aguardando liquidação.',
+  }
+];
+
+// Webhook Execution Events Log
+export interface WebhookEventLog {
+  id: string;
+  timestamp: string;
+  sourceIp: string;
+  eventType: string;
+  paymentId: string;
+  externalReference?: string;
+  status: string;
+  amount?: number;
+  payerEmail?: string;
+  matchedEntity?: string;
+  result: string;
+}
+
+const webhookEventsLog: WebhookEventLog[] = [
+  {
+    id: 'EVT-INIT-001',
+    timestamp: new Date(Date.now() - 3600000).toISOString(),
+    sourceIp: '209.225.49.12',
+    eventType: 'payment.updated',
+    paymentId: 'MP-9812401827',
+    externalReference: 'REF-CLI-SOBRADO-002',
+    status: 'approved',
+    amount: 3500.00,
+    payerEmail: 'roberto.albuquerque@gmail.com',
+    matchedEntity: 'Cliente: Roberto Albuquerque',
+    result: 'Status atualizado para Aprovado e repassado via PIX',
+  },
+  {
+    id: 'EVT-INIT-002',
+    timestamp: new Date(Date.now() - 1800000).toISOString(),
+    sourceIp: '209.225.49.15',
+    eventType: 'payment.created',
+    paymentId: 'MP-4482910291',
+    externalReference: 'REF-CLI-LAUDO-003',
+    status: 'approved',
+    amount: 450.00,
+    payerEmail: 'sindico@edificiomirante.com.br',
+    matchedEntity: 'Cliente: Condomínio Edifício Mirante',
+    result: 'Status atualizado para Aprovado e repassado via PIX',
+  }
+];
+
+// Endpoints for Receipts (Clientes e Prestadores)
+app.get('/api/recebimentos', (req, res) => {
+  const { category, status, search } = req.query as { category?: string; status?: string; search?: string };
+
+  let list = [...clientAndProviderReceipts];
+
+  if (category && (category === 'cliente' || category === 'prestador')) {
+    list = list.filter(r => r.category === category);
+  }
+
+  if (status) {
+    list = list.filter(r => r.status.toLowerCase() === status.toLowerCase());
+  }
+
+  if (search) {
+    const s = search.toLowerCase();
+    list = list.filter(r => 
+      r.partyName.toLowerCase().includes(s) ||
+      r.description.toLowerCase().includes(s) ||
+      r.referenceId.toLowerCase().includes(s) ||
+      (r.projectName && r.projectName.toLowerCase().includes(s))
+    );
+  }
+
+  const clientes = clientAndProviderReceipts.filter(r => r.category === 'cliente');
+  const prestadores = clientAndProviderReceipts.filter(r => r.category === 'prestador');
+
+  const summary = {
+    totalOverallApproved: clientAndProviderReceipts.filter(r => r.status === 'Aprovado').reduce((acc, curr) => acc + curr.amount, 0),
+    totalOverallPending: clientAndProviderReceipts.filter(r => r.status === 'Pendente').reduce((acc, curr) => acc + curr.amount, 0),
+    clientesApproved: clientes.filter(r => r.status === 'Aprovado').reduce((acc, curr) => acc + curr.amount, 0),
+    clientesPending: clientes.filter(r => r.status === 'Pendente').reduce((acc, curr) => acc + curr.amount, 0),
+    prestadoresApproved: prestadores.filter(r => r.status === 'Aprovado').reduce((acc, curr) => acc + curr.amount, 0),
+    prestadoresPending: prestadores.filter(r => r.status === 'Pendente').reduce((acc, curr) => acc + curr.amount, 0),
+    totalCount: clientAndProviderReceipts.length,
+    pendingCount: clientAndProviderReceipts.filter(r => r.status === 'Pendente').length,
+    approvedCount: clientAndProviderReceipts.filter(r => r.status === 'Aprovado').length,
+  };
+
+  res.json({ success: true, summary, receipts: list });
+});
+
+// Create new Client or Provider Receipt
+app.post('/api/recebimentos', (req, res) => {
+  const { category, partyName, partyEmail, partyPhone, partyCpfCnpj, description, projectName, amount, method, dueDate, notes } = req.body;
+
+  if (!partyName || !amount || Number(amount) <= 0) {
+    return res.status(400).json({ error: 'Nome do pagador e valor válido são obrigatórios.' });
+  }
+
+  const cat: 'cliente' | 'prestador' = category === 'prestador' ? 'prestador' : 'cliente';
+  const prefix = cat === 'cliente' ? 'CLI' : 'PREST';
+  const newReceipt: ClientProviderReceipt = {
+    id: `REC-${prefix}-${Date.now()}`,
+    category: cat,
+    partyName,
+    partyEmail: partyEmail || '',
+    partyPhone: partyPhone || '',
+    partyCpfCnpj: partyCpfCnpj || '',
+    description: description || `Recebimento de ${cat === 'cliente' ? 'Cliente' : 'Prestador'}`,
+    projectName: projectName || '',
+    amount: Number(amount),
+    method: method || 'PIX',
+    status: 'Pendente',
+    referenceId: `REF-${prefix}-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+    dueDate: dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    notes: notes || '',
+  };
+
+  clientAndProviderReceipts.unshift(newReceipt);
+  recordAuditLog('CONFIG_CHANGE', 'INFO', req.ip || '127.0.0.1', `Novo recebimento criado para ${cat}: ${partyName} (R$ ${newReceipt.amount})`);
+
+  res.json({ success: true, receipt: newReceipt });
+});
+
+// Manual update of receipt status
+app.post('/api/recebimentos/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status, notes } = req.body;
+
+  const receipt = clientAndProviderReceipts.find(r => r.id === id || r.referenceId === id);
+  if (!receipt) {
+    return res.status(404).json({ error: 'Recebimento não encontrado.' });
+  }
+
+  receipt.status = status || receipt.status;
+  if (notes) receipt.notes = notes;
+  receipt.updatedAt = new Date().toISOString();
+
+  if (status === 'Aprovado' && !receipt.paymentDate) {
+    receipt.paymentDate = new Date().toISOString().split('T')[0];
+    if (autoWithdrawEnabled && receipt.amount > 0) {
+      performAutomaticTransfer(receipt.amount, `${receipt.category === 'cliente' ? 'Cliente' : 'Prestador'}: ${receipt.partyName}`).catch(console.error);
+    }
+  }
+
+  recordAuditLog('CONFIG_CHANGE', 'INFO', req.ip || '127.0.0.1', `Status do recebimento ${receipt.id} (${receipt.partyName}) alterado para ${status}`);
+  res.json({ success: true, receipt });
+});
+
 // Get Subscribers Cashflow & Payments
 app.get('/api/admin/subscribers-cashflow', (req, res) => {
   const authHeader = req.headers.authorization;
@@ -1210,68 +1520,270 @@ app.get('/api/mercadopago/check-payment/:id', async (req, res) => {
   }
 });
 
-// Mercado Pago: Webhook IPN Listener
-app.post('/api/mercadopago/webhook', async (req, res) => {
-  try {
-    const { type, data, action, simulatedStatus } = req.body;
-    console.log(`[Mercado Pago Webhook] Received notification: type=${type}, action=${action}, simulatedStatus=${simulatedStatus}`, data);
+// Mercado Pago: Webhook IPN Listener (GET for Mercado Pago URL validation)
+app.get(['/api/mercadopago/webhook', '/api/webhook/mercadopago'], (req, res) => {
+  res.status(200).json({
+    status: 'active',
+    endpoint: '/api/mercadopago/webhook',
+    timestamp: new Date().toISOString(),
+    message: 'Webhook Mercado Pago ativo e pronto para receber notificações de pagamentos de clientes e prestadores.',
+  });
+});
 
-    if ((type === 'payment' || action?.includes('payment')) && data?.id) {
+// Mercado Pago: Webhook Notification Handler (POST)
+app.post(['/api/mercadopago/webhook', '/api/webhook/mercadopago'], async (req, res) => {
+  try {
+    const { type, data, action, simulatedStatus, live_mode } = req.body || {};
+    
+    // Support both body payload and query params (Mercado Pago IPN sends ?id=...&topic=payment or ?data.id=...&type=payment)
+    const paymentId = String(
+      req.query['data.id'] || 
+      req.query.id || 
+      data?.id || 
+      req.body?.id || 
+      ''
+    );
+    const eventType = String(
+      req.query.type || 
+      req.query.topic || 
+      type || 
+      (action?.includes('payment') ? 'payment' : action) || 
+      'payment'
+    );
+
+    console.log(`[Mercado Pago Webhook] Notification received: eventType=${eventType}, paymentId=${paymentId}, action=${action}`);
+
+    if (paymentId && (eventType.includes('payment') || action?.includes('payment'))) {
       const mpClient = getMercadoPagoClient();
       let status = simulatedStatus || 'pending';
       let statusDetail = 'waiting_payment';
-      let externalRef = `sim-${data.id}`;
+      let externalRef = `ref-${paymentId}`;
       let amount = 0;
+      let payerEmail = req.body?.payer_email || '';
+      let payerName = req.body?.payer_name || '';
+      let dateApproved: string | undefined = undefined;
 
-      if (mpClient && !data.id.startsWith('demo')) {
-        const payment = new Payment(mpClient);
-        const paymentData = await payment.get({ id: data.id });
-        externalRef = paymentData.external_reference;
-        status = paymentData.status;
-        statusDetail = paymentData.status_detail;
-        amount = paymentData.transaction_amount;
-      } else if (simulatedStatus) {
-        // Use provided simulated status
-        status = simulatedStatus;
+      // Fetch live payment data from Mercado Pago API if credentials exist and not in pure simulation
+      if (mpClient && !paymentId.startsWith('demo') && !paymentId.startsWith('sim') && !simulatedStatus) {
+        try {
+          const payment = new Payment(mpClient);
+          const paymentData = await payment.get({ id: paymentId });
+          externalRef = paymentData.external_reference || externalRef;
+          status = paymentData.status || status;
+          statusDetail = paymentData.status_detail || statusDetail;
+          amount = Number(paymentData.transaction_amount) || amount;
+          payerEmail = paymentData.payer?.email || payerEmail;
+          payerName = `${paymentData.payer?.first_name || ''} ${paymentData.payer?.last_name || ''}`.trim() || payerName;
+          dateApproved = paymentData.date_approved ? String(paymentData.date_approved).split('T')[0] : undefined;
+        } catch (fetchErr: any) {
+          console.warn('[Mercado Pago Webhook] Note on fetching payment data:', fetchErr?.message || fetchErr);
+        }
+      } else if (simulatedStatus || req.body?.amount) {
+        status = simulatedStatus || req.body?.status || 'approved';
         statusDetail = 'accredited';
-        externalRef = data.external_reference || data.id;
-        amount = data.amount || 0;
+        externalRef = req.body?.external_reference || req.body?.referenceId || externalRef;
+        amount = Number(req.body?.amount) || 0;
+        dateApproved = new Date().toISOString().split('T')[0];
       }
 
-      console.log(`[Mercado Pago Webhook] Payment ${data.id} status is ${status} (Ref: ${externalRef})`);
+      console.log(`[Mercado Pago Webhook] Evaluated payment: id=${paymentId}, status=${status}, amount=R$ ${amount}, ref=${externalRef}`);
 
+      // Map Mercado Pago status to internal status
+      let internalStatus: 'Aprovado' | 'Pendente' | 'Rejeitado' | 'Cancelado' | 'Reembolsado' = 'Pendente';
+      if (status === 'approved' || status === 'accredited') {
+        internalStatus = 'Aprovado';
+      } else if (status === 'rejected') {
+        internalStatus = 'Rejeitado';
+      } else if (status === 'cancelled') {
+        internalStatus = 'Cancelado';
+      } else if (status === 'refunded' || status === 'charged_back') {
+        internalStatus = 'Reembolsado';
+      }
+
+      let matchedEntity = 'Não vinculado';
+
+      // 1. Atualizar Recebimentos de Clientes e Prestadores (clientAndProviderReceipts)
+      const receiptIdx = clientAndProviderReceipts.findIndex(r => 
+        r.referenceId === externalRef || 
+        r.id === externalRef || 
+        (r.mpPaymentId && r.mpPaymentId === paymentId) ||
+        (payerEmail && r.partyEmail.toLowerCase() === payerEmail.toLowerCase())
+      );
+
+      if (receiptIdx !== -1) {
+        const receipt = clientAndProviderReceipts[receiptIdx];
+        receipt.status = internalStatus;
+        receipt.mpPaymentId = paymentId;
+        receipt.lastWebhookAt = new Date().toISOString();
+        receipt.updatedAt = new Date().toISOString();
+        if (internalStatus === 'Aprovado') {
+          receipt.paymentDate = dateApproved || new Date().toISOString().split('T')[0];
+        }
+        matchedEntity = `${receipt.category === 'cliente' ? 'Cliente' : 'Prestador'}: ${receipt.partyName}`;
+        
+        recordAuditLog(
+          'CONFIG_CHANGE', 
+          internalStatus === 'Aprovado' ? 'INFO' : 'WARNING', 
+          req.ip || '127.0.0.1', 
+          `Webhook Mercado Pago: Recebimento de ${receipt.category} (${receipt.partyName}) atualizado para ${internalStatus}. Valor: R$ ${receipt.amount}`
+        );
+      }
+
+      // 2. Atualizar Mensalidades e Assinaturas (subscriberPayments)
+      const subIdx = subscriberPayments.findIndex(p => 
+        p.id === externalRef || 
+        p.transactionId === externalRef || 
+        (payerEmail && p.subscriberEmail.toLowerCase() === payerEmail.toLowerCase())
+      );
+
+      if (subIdx !== -1) {
+        subscriberPayments[subIdx].status = internalStatus === 'Aprovado' ? 'Aprovado' : (internalStatus === 'Rejeitado' ? 'Atrasado' : subscriberPayments[subIdx].status);
+        if (internalStatus === 'Aprovado') {
+          subscriberPayments[subIdx].paymentDate = dateApproved || new Date().toISOString().split('T')[0];
+          subscriberPayments[subIdx].transactionId = paymentId;
+        }
+        matchedEntity = `Assinante: ${subscriberPayments[subIdx].subscriberName}`;
+        
+        recordAuditLog(
+          'CONFIG_CHANGE', 
+          'INFO', 
+          'SYSTEM', 
+          `Webhook Mercado Pago: Assinatura de ${subscriberPayments[subIdx].subscriberName} atualizada para ${subscriberPayments[subIdx].status}.`
+        );
+      }
+
+      // 3. Atualizar Status em Tempo Real para Polling do Front-End
       if (externalRef) {
-        // Update real-time status map for client polling
         realTimePaymentStatuses.set(externalRef, {
           status,
           statusDetail,
           amount,
           updatedAt: Date.now(),
         });
+      }
 
-        // If it's an approved payment, update internal states
-        if (status === 'approved' || status === 'accredited') {
-          // Update subscriber payments list if match
-          const subIdx = subscriberPayments.findIndex(p => p.id === externalRef || p.transactionId === externalRef);
-          if (subIdx !== -1) {
-            subscriberPayments[subIdx].status = 'Aprovado';
-            subscriberPayments[subIdx].paymentDate = new Date().toISOString().split('T')[0];
-            recordAuditLog('CONFIG_CHANGE', 'INFO', 'SYSTEM', `Assinatura ${subscriberPayments[subIdx].subscriberName} aprovada automaticamente via Webhook.`);
-          }
+      // 4. Salvar no Log de Eventos de Webhook para Auditoria
+      const logEntry: WebhookEventLog = {
+        id: `EVT-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: new Date().toISOString(),
+        sourceIp: req.ip || '127.0.0.1',
+        eventType: action || eventType,
+        paymentId,
+        externalReference: externalRef,
+        status,
+        amount: amount > 0 ? amount : undefined,
+        payerEmail: payerEmail || undefined,
+        matchedEntity,
+        result: `Status alterado para ${internalStatus}.`,
+      };
+      webhookEventsLog.unshift(logEntry);
+      if (webhookEventsLog.length > 50) webhookEventsLog.pop();
 
-          // 🚀 AUTOMATION: If auto-withdraw is enabled, transfer the amount immediately
-          if (autoWithdrawEnabled && amount > 0) {
-            performAutomaticTransfer(amount, `Recebimento Ref: ${externalRef}`);
-          }
-        }
+      // 5. 🚀 AUTOMAÇÃO: Se aprovado e auto-transferência ativa, repassar imediatamente via PIX
+      if (internalStatus === 'Aprovado' && autoWithdrawEnabled && amount > 0) {
+        performAutomaticTransfer(amount, `Webhook: ${matchedEntity} (Ref: ${externalRef})`).catch(err => {
+          console.warn('Auto-transfer warning on webhook:', err);
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Notificação do Mercado Pago processada com sucesso.',
+        paymentId,
+        status: internalStatus,
+        externalReference: externalRef,
+        matchedEntity,
+      });
+    }
+
+    return res.status(200).json({ success: true, message: 'Evento recebido e registrado.' });
+  } catch (error: any) {
+    console.error('Error in Mercado Pago Webhook:', error);
+    return res.status(200).json({ success: false, error: error.message || 'Erro no webhook' });
+  }
+});
+
+// Endpoint to Simulate / Test Mercado Pago Webhook Notifications
+app.post('/api/mercadopago/webhook/simulate', async (req, res) => {
+  try {
+    const { receiptId, referenceId, status = 'approved', amount, payerEmail } = req.body;
+
+    const receipt = clientAndProviderReceipts.find(r => r.id === receiptId || r.referenceId === referenceId || r.referenceId === receiptId);
+    const targetRef = receipt ? receipt.referenceId : (referenceId || receiptId || `REF-SIM-${Date.now()}`);
+    const targetAmount = amount || (receipt ? receipt.amount : 150.00);
+    const fakePaymentId = `MP-SIM-${Date.now()}`;
+
+    // Dispara internamente a mesma rotina de webhook
+    const simulatedStatus = status === 'approved' ? 'approved' : status;
+    const internalStatus = simulatedStatus === 'approved' ? 'Aprovado' : (simulatedStatus === 'rejected' ? 'Rejeitado' : 'Pendente');
+
+    if (receipt) {
+      receipt.status = internalStatus;
+      receipt.mpPaymentId = fakePaymentId;
+      receipt.lastWebhookAt = new Date().toISOString();
+      receipt.updatedAt = new Date().toISOString();
+      if (internalStatus === 'Aprovado') {
+        receipt.paymentDate = new Date().toISOString().split('T')[0];
       }
     }
 
-    return res.status(200).json({ success: true, message: 'Webhook processed' });
+    // Atualiza status em tempo real
+    realTimePaymentStatuses.set(targetRef, {
+      status: simulatedStatus,
+      statusDetail: 'accredited',
+      amount: targetAmount,
+      updatedAt: Date.now(),
+    });
+
+    // Registra log
+    const matchedEntity = receipt ? `${receipt.category === 'cliente' ? 'Cliente' : 'Prestador'}: ${receipt.partyName}` : 'Simulação Manual';
+    webhookEventsLog.unshift({
+      id: `EVT-SIM-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      sourceIp: req.ip || '127.0.0.1',
+      eventType: 'payment.updated (simulado)',
+      paymentId: fakePaymentId,
+      externalReference: targetRef,
+      status: simulatedStatus,
+      amount: targetAmount,
+      payerEmail: payerEmail || receipt?.partyEmail || 'teste@mercadopago.com',
+      matchedEntity,
+      result: `Status atualizado para ${internalStatus} via simulador.`,
+    });
+
+    // Dispara auto-transferência se aprovado
+    if (internalStatus === 'Aprovado' && autoWithdrawEnabled && targetAmount > 0) {
+      performAutomaticTransfer(targetAmount, `Webhook Simulado: ${matchedEntity}`).catch(console.error);
+    }
+
+    recordAuditLog(
+      'CONFIG_CHANGE',
+      'INFO',
+      req.ip || '127.0.0.1',
+      `Simulação de Webhook Mercado Pago executada: ${targetRef} -> ${internalStatus} (R$ ${targetAmount})`
+    );
+
+    return res.json({
+      success: true,
+      message: `Simulação de webhook executada com sucesso. Status atualizado para ${internalStatus}.`,
+      paymentId: fakePaymentId,
+      reference: targetRef,
+      status: internalStatus,
+      receipt,
+    });
   } catch (error: any) {
-    console.error('Error in Mercado Pago Webhook:', error);
-    return res.status(200).send('Webhook handled with error');
+    console.error('Error in /api/mercadopago/webhook/simulate:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao simular webhook' });
   }
+});
+
+// Endpoint to View Webhook Logs
+app.get('/api/mercadopago/webhook-logs', (req, res) => {
+  res.json({
+    success: true,
+    totalLogs: webhookEventsLog.length,
+    logs: webhookEventsLog.slice(0, 30),
+  });
 });
 
 // Auto-Withdraw Configuration Endpoints

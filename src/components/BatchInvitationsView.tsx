@@ -122,7 +122,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
   // Statistics
   const stats = useMemo(() => {
     const total = contacts.length;
-    const sent = contacts.filter((c) => c.status === 'Enviado' || c.status === 'Respondido').length;
+    const sent = contacts.filter((c) => c.status !== 'Pendente' && c.status !== 'Na Fila').length;
     const pending = total - sent;
     const spCount = contacts.filter((c) => c.region === 'SP').length;
     const rjCount = contacts.filter((c) => c.region === 'RJ').length;
@@ -562,9 +562,12 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
             className="px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 focus:outline-none"
           >
             <option value="ALL">Todos os Status</option>
-            <option value="Pendente">Apenas Pendentes</option>
-            <option value="Enviado">Apenas Enviados</option>
-            <option value="Respondido">Apenas Respondidos</option>
+            <option value="Pendente">Pendentes</option>
+            <option value="Enviado">Enviados</option>
+            <option value="Recebido">Recebidos</option>
+            <option value="Visualizado">Visualizados</option>
+            <option value="Lido">Lidos</option>
+            <option value="Respondido">Respondidos</option>
           </select>
         </div>
       </div>

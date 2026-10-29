@@ -766,17 +766,49 @@ export function saveCorporateContacts(contacts: CorporateContact[]): void {
 export function updateCorporateContactStatus(
   contactId: string, 
   status: CorporateContact['status'], 
-  channel: 'WhatsApp' | 'Email' = 'WhatsApp'
+  channel: 'WhatsApp' | 'Email' = 'WhatsApp',
+  extra?: {
+    responseText?: string;
+    responseInterest?: 'Interessado' | 'Em Avaliação' | 'Cadastrado' | 'Sem Interesse';
+    notes?: string;
+  }
 ): CorporateContact[] {
   const current = loadCorporateContacts();
+  const now = new Date().toISOString();
   const updated = current.map(c => {
     if (c.id === contactId) {
-      return {
+      const next: CorporateContact = {
         ...c,
         status,
-        dispatchChannel: channel,
-        lastDispatchedAt: new Date().toISOString(),
+        dispatchChannel: channel || c.dispatchChannel,
+        notes: extra?.notes !== undefined ? extra.notes : c.notes,
       };
+
+      if (status === 'Enviado') {
+        next.lastDispatchedAt = now;
+      } else if (status === 'Recebido') {
+        if (!next.lastDispatchedAt) next.lastDispatchedAt = now;
+        next.receivedAt = now;
+      } else if (status === 'Visualizado') {
+        if (!next.lastDispatchedAt) next.lastDispatchedAt = now;
+        if (!next.receivedAt) next.receivedAt = now;
+        next.viewedAt = now;
+      } else if (status === 'Lido') {
+        if (!next.lastDispatchedAt) next.lastDispatchedAt = now;
+        if (!next.receivedAt) next.receivedAt = now;
+        if (!next.viewedAt) next.viewedAt = now;
+        next.readAt = now;
+      } else if (status === 'Respondido') {
+        if (!next.lastDispatchedAt) next.lastDispatchedAt = now;
+        if (!next.receivedAt) next.receivedAt = now;
+        if (!next.viewedAt) next.viewedAt = now;
+        if (!next.readAt) next.readAt = now;
+        next.respondedAt = now;
+        if (extra?.responseText) next.responseText = extra.responseText;
+        if (extra?.responseInterest) next.responseInterest = extra.responseInterest;
+      }
+
+      return next;
     }
     return c;
   });

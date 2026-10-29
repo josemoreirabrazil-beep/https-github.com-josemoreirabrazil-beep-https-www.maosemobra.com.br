@@ -87,6 +87,8 @@ import {
 } from '../services/subscriberBilling';
 import { INITIAL_CORPORATE_CONTACTS } from '../data/corporateContacts';
 import { loadCorporateContacts, updateCorporateContactStatus } from '../services/storage';
+import { RecebimentosWebhookManager } from './RecebimentosWebhookManager';
+import { InvitationMetricsManager } from './InvitationMetricsManager';
 import confetti from 'canvas-confetti';
 
 interface AdminMasterViewProps {
@@ -123,7 +125,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'cashflow' | 'shield' | 'database' | 'logs' | 'users' | 'prospec'>('cashflow');
+  const [activeSubTab, setActiveSubTab] = useState<'cashflow' | 'shield' | 'database' | 'logs' | 'users' | 'prospec' | 'invitations'>('cashflow');
 
   // Subscribers Cashflow & Billing State
   const [subscriberPayments, setSubscriberPayments] = useState<SubscriberPayment[]>([]);
@@ -859,6 +861,21 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           <Briefcase className="w-4 h-4" />
           <span>Prospecção B2B (IA)</span>
         </button>
+
+        <button
+          onClick={() => setActiveSubTab('invitations')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'invitations'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <Send className="w-4 h-4" />
+          <span>Status de Convites & Respostas</span>
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-500 text-white ml-1">
+            Funil & Métricas
+          </span>
+        </button>
       </div>
 
       {/* ======================================================== */}
@@ -1095,6 +1112,9 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               </div>
             )}
           </div>
+
+          {/* MERCADO PAGO WEBHOOK MANAGER: CLIENT & SERVICE PROVIDER RECEIPTS */}
+          <RecebimentosWebhookManager onRefreshParent={() => loadAllAdminData(false)} />
 
           {/* SUBSCRIPTION PLANS PRICING TABLE & PRICE UPDATES */}
           <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
@@ -1824,13 +1844,23 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={() => handleLoadOfficialCatalog('ALL')}
-                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95 cursor-pointer shrink-0"
-              >
-                <Zap className="w-4 h-4" />
-                <span>Carregar Todas as 300+ Construtoras</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setActiveSubTab('invitations')}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                >
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  <span>Ver Funil & Respostas</span>
+                </button>
+
+                <button
+                  onClick={() => handleLoadOfficialCatalog('ALL')}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95 cursor-pointer shrink-0"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>Carregar Todas as 300+ Construtoras</span>
+                </button>
+              </div>
             </div>
 
             {/* Quick Filter Loaders */}
@@ -2046,6 +2076,15 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 📊 TAB 7: STATUS DE CONVITES, MÉTRICAS E RESPOSTAS */}
+      {/* ======================================================== */}
+      {activeSubTab === 'invitations' && (
+        <div className="space-y-6">
+          <InvitationMetricsManager onRefreshParent={() => loadAllAdminData(false)} />
         </div>
       )}
 

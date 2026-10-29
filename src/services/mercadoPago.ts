@@ -200,3 +200,94 @@ export async function triggerAutoSweep(amount?: number, reason?: string): Promis
   return response.json();
 }
 
+export interface ClientProviderReceipt {
+  id: string;
+  category: 'cliente' | 'prestador';
+  partyName: string;
+  partyEmail: string;
+  partyPhone?: string;
+  partyCpfCnpj?: string;
+  description: string;
+  projectName?: string;
+  amount: number;
+  method: 'PIX' | 'Cartão de Crédito' | 'Mercado Pago' | 'Boleto';
+  status: 'Pendente' | 'Aprovado' | 'Rejeitado' | 'Cancelado' | 'Reembolsado';
+  referenceId: string;
+  mpPaymentId?: string;
+  paymentDate?: string;
+  dueDate?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastWebhookAt?: string;
+  notes?: string;
+}
+
+export interface RecebimentosResponse {
+  success: boolean;
+  summary: {
+    totalOverallApproved: number;
+    totalOverallPending: number;
+    clientesApproved: number;
+    clientesPending: number;
+    prestadoresApproved: number;
+    prestadoresPending: number;
+    totalCount: number;
+    pendingCount: number;
+    approvedCount: number;
+  };
+  receipts: ClientProviderReceipt[];
+}
+
+export async function getRecebimentos(params?: {
+  category?: 'cliente' | 'prestador';
+  status?: string;
+  search?: string;
+}): Promise<RecebimentosResponse> {
+  const query = new URLSearchParams();
+  if (params?.category) query.append('category', params.category);
+  if (params?.status) query.append('status', params.status);
+  if (params?.search) query.append('search', params.search);
+
+  const response = await fetch(`/api/recebimentos?${query.toString()}`);
+  if (!response.ok) throw new Error('Erro ao buscar recebimentos');
+  return response.json();
+}
+
+export async function createRecebimento(data: Partial<ClientProviderReceipt>): Promise<{ success: boolean; receipt: ClientProviderReceipt }> {
+  const response = await fetch('/api/recebimentos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao criar recebimento');
+  }
+  return response.json();
+}
+
+export async function simulateWebhook(data: {
+  receiptId?: string;
+  referenceId?: string;
+  status?: string;
+  amount?: number;
+  payerEmail?: string;
+}): Promise<any> {
+  const response = await fetch('/api/mercadopago/webhook/simulate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao simular webhook');
+  }
+  return response.json();
+}
+
+export async function getWebhookLogs(): Promise<{ success: boolean; logs: any[] }> {
+  const response = await fetch('/api/mercadopago/webhook-logs');
+  if (!response.ok) throw new Error('Erro ao carregar logs de webhook');
+  return response.json();
+}
+

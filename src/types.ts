@@ -420,7 +420,14 @@ export interface ProjectGoal {
 }
 
 export type CorporateContactRegion = 'SP' | 'RJ' | 'MG' | 'BA' | 'Nacional' | 'Internacional';
-export type CorporateContactStatus = 'Pendente' | 'Na Fila' | 'Enviado' | 'Respondido';
+export type CorporateContactStatus = 
+  | 'Pendente' 
+  | 'Na Fila' 
+  | 'Enviado' 
+  | 'Recebido' 
+  | 'Visualizado' 
+  | 'Lido' 
+  | 'Respondido';
 
 export interface CorporateContact {
   id: string;
@@ -433,6 +440,12 @@ export interface CorporateContact {
   category?: string;
   lastDispatchedAt?: string;
   dispatchChannel?: 'WhatsApp' | 'Email';
+  receivedAt?: string;
+  viewedAt?: string;
+  readAt?: string;
+  respondedAt?: string;
+  responseText?: string;
+  responseInterest?: 'Interessado' | 'Em Avaliação' | 'Cadastrado' | 'Sem Interesse';
   notes?: string;
 }
 
