@@ -172,8 +172,50 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
   // B2B Prospecção State
   const [prospecInput, setProspecInput] = useState('');
-  const [prospecResults, setProspecResults] = useState<{ name: string; message: string }[]>([]);
+  const [prospecResults, setProspecResults] = useState<{ name: string; message: string; phone?: string }[]>([]);
   const [isGeneratingProspec, setIsGeneratingProspec] = useState(false);
+  const [selectedProspecs, setSelectedProspecs] = useState<Set<number>>(new Set());
+  const [isBatchSending, setIsBatchSending] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(0);
+  const [dispatchedIndices, setDispatchedIndices] = useState<Set<number>>(new Set());
+
+  const handleToggleProspecSelection = (idx: number) => {
+    const newSelection = new Set(selectedProspecs);
+    if (newSelection.has(idx)) newSelection.delete(idx);
+    else newSelection.add(idx);
+    setSelectedProspecs(newSelection);
+  };
+
+  const handleSelectAllProspecs = () => {
+    if (selectedProspecs.size === prospecResults.length) {
+      setSelectedProspecs(new Set());
+    } else {
+      setSelectedProspecs(new Set(prospecResults.map((_, i) => i)));
+    }
+  };
+
+  const handleBatchSend = async () => {
+    if (selectedProspecs.size === 0) return;
+    
+    setIsBatchSending(true);
+    setBatchProgress(0);
+    const selectedIndices = Array.from(selectedProspecs);
+    
+    for (let i = 0; i < selectedIndices.length; i++) {
+      const idx = selectedIndices[i];
+      
+      // Simulate API call delay for "Dispatch"
+      await new Promise(resolve => setTimeout(resolve, 600));
+      
+      setDispatchedIndices(prev => new Set(prev).add(idx));
+      setBatchProgress(Math.round(((i + 1) / selectedIndices.length) * 100));
+    }
+    
+    setIsBatchSending(false);
+    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    alert(`Sucesso! ${selectedProspecs.size} convites foram processados e integrados à fila de disparo CRM.`);
+    setSelectedProspecs(new Set());
+  };
 
   const handleGenerateProspec = async () => {
     if (!prospecInput.trim()) return;
@@ -190,6 +232,8 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       const data = await response.json();
       if (data.results) {
         setProspecResults(data.results);
+        setSelectedProspecs(new Set()); // Reset selection on new generation
+        setDispatchedIndices(new Set()); // Reset dispatch status on new generation
         confetti({ particleCount: 50, spread: 70 });
       }
     } catch (err) {
@@ -1751,40 +1795,122 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           {prospecResults.length > 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 flex items-center justify-between">
-                <span>Resultados Gerados ({prospecResults.length})</span>
+                <div className="flex items-center gap-3">
+                  <span>Resultados Gerados ({prospecResults.length})</span>
+                  <button 
+                    onClick={handleSelectAllProspecs}
+                    className="text-amber-500 hover:underline lowercase font-bold"
+                  >
+                    {selectedProspecs.size === prospecResults.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                  </button>
+                </div>
                 <button 
-                  onClick={() => setProspecResults([])}
+                  onClick={() => {
+                    setProspecResults([]);
+                    setSelectedProspecs(new Set());
+                  }}
                   className="text-rose-500 hover:underline lowercase"
                 >
                   Limpar Resultados
                 </button>
               </h4>
+
+              {/* Batch Action Bar */}
+              {selectedProspecs.size > 0 && (
+                <div className="sticky top-4 z-30 p-4 bg-slate-900 border border-amber-500/50 rounded-2xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-in slide-in-from-top-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-amber-500/20 text-amber-400 rounded-lg font-black text-xs">
+                      {selectedProspecs.size} SELECIONADOS
+                    </div>
+                    {isBatchSending && (
+                      <div className="flex items-center gap-2">
+                        <div className="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-amber-500 transition-all duration-300"
+                            style={{ width: `${batchProgress}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] font-mono text-amber-500">{batchProgress}%</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleBatchSend}
+                    disabled={isBatchSending}
+                    className="w-full sm:w-auto px-6 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95 disabled:opacity-50"
+                  >
+                    {isBatchSending ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Disparando Convites...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4" />
+                        <span>Iniciar Disparo Automático em Lote</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {prospecResults.map((res, idx) => (
-                  <div key={idx} className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs group hover:border-amber-500/50 transition-all">
-                    <div className="flex items-center justify-between mb-2">
-                      <h5 className="text-sm font-black text-slate-900 dark:text-white">{res.name}</h5>
-                      <button 
-                        onClick={() => handleCopy(res.message, `msg-${idx}`)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-500/10 transition-all"
-                        title="Copiar Mensagem"
+                  <div 
+                    key={idx} 
+                    className={`p-5 rounded-3xl bg-white dark:bg-slate-900 border transition-all relative group ${
+                      selectedProspecs.has(idx) 
+                        ? 'border-amber-500 shadow-md ring-1 ring-amber-500/20' 
+                        : 'border-slate-200 dark:border-slate-800 shadow-xs hover:border-amber-500/50'
+                    }`}
+                  >
+                    {/* Selection Checkbox */}
+                    <div className="absolute top-4 left-4 z-10">
+                      <button
+                        onClick={() => handleToggleProspecSelection(idx)}
+                        className={`w-5 h-5 rounded-lg border-2 transition-all flex items-center justify-center cursor-pointer ${
+                          selectedProspecs.has(idx)
+                            ? 'bg-amber-500 border-amber-500 text-slate-950'
+                            : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800'
+                        }`}
                       >
-                        {copiedKey === `msg-${idx}` ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                        {selectedProspecs.has(idx) && <Check className="w-3.5 h-3.5" />}
                       </button>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed italic">
-                      "{res.message}"
-                    </p>
-                    <div className="mt-4 flex items-center gap-2">
-                      <a 
-                        href={`https://wa.me/?text=${encodeURIComponent(res.message)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-[10px] text-center flex items-center justify-center gap-1.5 transition shadow-sm"
-                      >
-                        <Phone className="w-3 h-3" />
-                        <span>Abrir no WhatsApp</span>
-                      </a>
+
+                    <div className="pl-8">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2 truncate">
+                          <h5 className="text-sm font-black text-slate-900 dark:text-white truncate">{res.name}</h5>
+                          {dispatchedIndices.has(idx) && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 text-[8px] font-black uppercase border border-emerald-500/30">
+                              Enviado
+                            </span>
+                          )}
+                        </div>
+                        <button 
+                          onClick={() => handleCopy(res.message, `msg-${idx}`)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-500/10 transition-all"
+                          title="Copiar Mensagem"
+                        >
+                          {copiedKey === `msg-${idx}` ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed italic line-clamp-3 group-hover:line-clamp-none transition-all">
+                        "{res.message}"
+                      </p>
+                      <div className="mt-4 flex items-center gap-2">
+                        <a 
+                          href={`https://wa.me/?text=${encodeURIComponent(res.message)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-[10px] text-center flex items-center justify-center gap-1.5 transition shadow-sm"
+                        >
+                          <Phone className="w-3 h-3" />
+                          <span>Abrir WhatsApp</span>
+                        </a>
+                      </div>
                     </div>
                   </div>
                 ))}

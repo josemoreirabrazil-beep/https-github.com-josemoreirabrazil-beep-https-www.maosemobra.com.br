@@ -26,14 +26,17 @@ import {
   QrCode,
   Sparkles,
   Loader2,
-  Activity
+  Activity,
+  RefreshCw
 } from 'lucide-react';
-import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal } from '../types';
+import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser } from '../types';
 import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
 import { ProjectGoals } from './ProjectGoals';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { fetchSubscribersCashflow } from '../services/subscriberBilling';
+import { MASTER_CREDENTIALS } from '../services/adminAuth';
 import confetti from 'canvas-confetti';
 
 interface DashboardViewProps {
@@ -50,29 +53,80 @@ interface DashboardViewProps {
   onSyncDrive: () => void;
   onUpdateProject: (updatedProject: Project) => void;
   isAuthenticated: boolean;
+  adminUser?: AdminMasterUser | null;
   goals?: ProjectGoal[];
   onSaveGoal?: (goal: ProjectGoal) => void;
   onDeleteGoal?: (goalId: string) => void;
 }
 
-export const DashboardView: React.FC<DashboardViewProps> = ({
-  project,
-  phases,
-  rdos,
-  expenses,
-  team = [],
-  user,
-  serviceRequests = [],
-  onNavigate,
-  onOpenNewRdo,
-  onOpenNewExpense,
-  onSyncDrive,
-  onUpdateProject,
-  isAuthenticated,
-  goals = [],
-  onSaveGoal = () => {},
-  onDeleteGoal = () => {},
-}) => {
+export const DashboardView: React.FC<DashboardViewProps> = (props) => {
+  const {
+    project,
+    phases,
+    rdos,
+    expenses,
+    team = [],
+    user,
+    serviceRequests = [],
+    onNavigate,
+    onOpenNewRdo,
+    onOpenNewExpense,
+    onSyncDrive,
+    onUpdateProject,
+    isAuthenticated,
+    goals = [],
+    onSaveGoal = () => {},
+    onDeleteGoal = () => {},
+  } = props;
+
+  // Platform financial metrics (for Admin Master)
+  const [platformTotal, setPlatformTotal] = useState<number>(0);
+  const [isPlatformWithdrawing, setIsPlatformWithdrawing] = useState(false);
+
+  React.useEffect(() => {
+    if (props.adminUser) {
+      fetchSubscribersCashflow().then(res => {
+        setPlatformTotal(res.summary.totalCollected);
+      });
+    }
+  }, [props.adminUser]);
+
+  const handlePlatformWithdrawal = async () => {
+    if (platformTotal <= 0) {
+      alert('Nenhum valor disponível para saque no caixa da plataforma.');
+      return;
+    }
+
+    if (!confirm(`Deseja transferir R$ ${platformTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para a conta Mercado Pago via PIX (${MASTER_CREDENTIALS.pixKey})?`)) {
+      return;
+    }
+
+    setIsPlatformWithdrawing(true);
+    try {
+      const response = await fetch('/api/mercadopago/transfer-pix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: platformTotal,
+          projectName: 'Saque Direto Dashboard - Mãos em Obra',
+          beneficiaryName: MASTER_CREDENTIALS.name,
+          pixKey: MASTER_CREDENTIALS.pixKey,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erro na transferência PIX');
+
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+      alert(`Sucesso! R$ ${platformTotal.toFixed(2)} transferidos para sua conta Mercado Pago.`);
+      setPlatformTotal(0);
+    } catch (err: any) {
+      alert(err.message || 'Erro ao realizar saque via PIX');
+    } finally {
+      setIsPlatformWithdrawing(false);
+    }
+  };
+
   // Financial metrics (Separated by Real Incomes & Real Outflows)
   const totalPlanned = Number(project.budgetTotal) || 0;
   
@@ -381,6 +435,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span>Admin Master</span>
             </button>
 
+            {/* Platform Withdrawal Button (Visible for Admin) */}
+            {props.adminUser && (
+              <button
+                onClick={handlePlatformWithdrawal}
+                disabled={isPlatformWithdrawing || platformTotal <= 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-lg transition cursor-pointer disabled:opacity-50"
+                title={`Sacar R$ ${platformTotal.toFixed(2)} para Mercado Pago via PIX`}
+              >
+                {isPlatformWithdrawing ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                )}
+                <span>Sacar R$ {platformTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
+              </button>
+            )}
+
             {/* PIX Quick QR Code & Key */}
             <button
               onClick={handleOpenMpModal}
@@ -445,16 +516,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
           
           {/* Disponível em Caixa */}
-          <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-              Disponível em Caixa (Saldo Real)
-            </span>
-            <div className={`text-2xl font-black ${availableCash >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-              R$ {availableCash.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Disponível em Caixa (Saldo Real)
+              </span>
+              <div className={`text-2xl font-black ${availableCash >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                R$ {availableCash.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                {availableCash >= 0 ? 'Superávit de caixa disponível' : 'Déficit no saldo operacional'}
+              </span>
             </div>
-            <span className="text-[10px] text-slate-400 mt-1 block">
-              {availableCash >= 0 ? 'Superávit de caixa disponível' : 'Déficit no saldo operacional'}
-            </span>
+
+            {/* 🔥 QUICK WITHDRAWAL BUTTON FOR ADMIN 🔥 */}
+            {props.adminUser && platformTotal > 0 && (
+              <button
+                onClick={handlePlatformWithdrawal}
+                disabled={isPlatformWithdrawing}
+                className="mt-4 w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                {isPlatformWithdrawing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <ArrowUpRight className="w-3 h-3" />}
+                <span>SACAR R$ {platformTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} P/ MERCADO PAGO</span>
+              </button>
+            )}
           </div>
 
           {/* Valores Recebidos */}

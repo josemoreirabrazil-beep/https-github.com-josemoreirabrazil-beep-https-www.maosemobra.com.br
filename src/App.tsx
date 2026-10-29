@@ -402,6 +402,7 @@ export default function App() {
             onSyncDrive={() => setActiveTab('drive')}
             onUpdateProject={handleSaveProject}
             isAuthenticated={isAuthenticated}
+            adminUser={adminUser}
           />
         )}
         

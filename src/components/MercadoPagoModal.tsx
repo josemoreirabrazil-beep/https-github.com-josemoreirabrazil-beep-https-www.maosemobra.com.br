@@ -17,6 +17,13 @@ import {
   KeyRound,
   Sparkles
 } from 'lucide-react';
+
+declare global {
+  interface Window {
+    MercadoPago: any;
+  }
+}
+
 import { 
   createMercadoPagoPreference, 
   createMercadoPagoPix, 
