@@ -599,6 +599,64 @@ app.post('/api/admin/subscribers-payment', (req, res) => {
   res.json({ success: true, payment: newPayment });
 });
 
+// Real-time Payment Status Tracking
+const realTimePaymentStatuses = new Map<string, { status: string; statusDetail: string; amount?: number; updatedAt: number }>();
+
+// Auto-Withdraw Configuration
+let autoWithdrawEnabled = true;
+
+/**
+ * Performs an automatic PIX transfer of a specified amount to the master account.
+ */
+async function performAutomaticTransfer(amount: number, descriptionSuffix: string = 'Automático') {
+  if (amount <= 0) return null;
+
+  const mpClient = getMercadoPagoClient();
+  const targetPixKey = '+5573998599213';
+  const targetBeneficiary = 'MAOS EM OBRA - Jose Moreira';
+  const transferId = `MP-AUTO-PIX-${Date.now()}`;
+
+  let result = {
+    success: true,
+    transferId,
+    amount,
+    status: 'simulated',
+  };
+
+  if (mpClient) {
+    try {
+      const payment = new Payment(mpClient);
+      const payoutData = await payment.create({
+        body: {
+          transaction_amount: Number(amount),
+          description: `Saque Automático PIX p/ Mercado Pago (${targetPixKey}) - ${descriptionSuffix}`,
+          payment_method_id: 'pix',
+          payer: {
+            email: 'financeiro@maosemobra.com.br',
+            first_name: 'Mãos em Obra',
+            last_name: 'Tesouraria',
+          },
+          external_reference: transferId,
+        },
+      });
+      result.transferId = String(payoutData.id);
+      result.status = payoutData.status || 'approved';
+    } catch (mpErr: any) {
+      console.warn('Mercado Pago Auto-Transfer Error:', mpErr?.message || mpErr);
+      result.success = false;
+    }
+  }
+
+  recordAuditLog(
+    'PIX_AUTO_TRANSFER',
+    result.success ? 'INFO' : 'CRITICAL',
+    'SYSTEM',
+    `Saque automático de R$ ${amount.toFixed(2)} processado via PIX (${targetPixKey}). Status: ${result.status}`
+  );
+
+  return result;
+}
+
 // Quick Update Status (e.g. Mark Paid / Overdue)
 app.post('/api/admin/subscribers-payment/:id/status', (req, res) => {
   const authHeader = req.headers.authorization;
@@ -1002,15 +1060,44 @@ app.get('/api/mercadopago/check-payment/:id', async (req, res) => {
 // Mercado Pago: Webhook IPN Listener
 app.post('/api/mercadopago/webhook', async (req, res) => {
   try {
-    const { type, data } = req.body;
-    console.log(`[Mercado Pago Webhook] Received notification: type=${type}`, data);
+    const { type, data, action } = req.body;
+    console.log(`[Mercado Pago Webhook] Received notification: type=${type}, action=${action}`, data);
 
-    if (type === 'payment' && data?.id) {
+    if ((type === 'payment' || action?.includes('payment')) && data?.id) {
       const mpClient = getMercadoPagoClient();
       if (mpClient) {
         const payment = new Payment(mpClient);
         const paymentData = await payment.get({ id: data.id });
-        console.log(`[Mercado Pago Webhook] Payment ${paymentData.id} status is ${paymentData.status}`);
+        const externalRef = paymentData.external_reference;
+        const status = paymentData.status;
+        const statusDetail = paymentData.status_detail;
+
+        console.log(`[Mercado Pago Webhook] Payment ${paymentData.id} status is ${status} (Ref: ${externalRef})`);
+
+        if (externalRef) {
+          // Update real-time status map for client polling
+          realTimePaymentStatuses.set(externalRef, {
+            status,
+            statusDetail,
+            amount: paymentData.transaction_amount,
+            updatedAt: Date.now(),
+          });
+
+          // If it's an approved subscriber payment, update the list
+          if (status === 'approved') {
+            const subIdx = subscriberPayments.findIndex(p => p.id === externalRef || p.transactionId === externalRef);
+            if (subIdx !== -1) {
+              subscriberPayments[subIdx].status = 'Aprovado';
+              subscriberPayments[subIdx].paymentDate = new Date().toISOString().split('T')[0];
+              recordAuditLog('CONFIG_CHANGE', 'INFO', 'SYSTEM', `Assinatura ${subscriberPayments[subIdx].subscriberName} aprovada automaticamente via Webhook.`);
+            }
+
+            // 🚀 AUTOMATION: If auto-withdraw is enabled, transfer the amount immediately
+            if (autoWithdrawEnabled && paymentData.transaction_amount > 0) {
+              performAutomaticTransfer(paymentData.transaction_amount, `Recebimento Ref: ${externalRef}`);
+            }
+          }
+        }
       }
     }
 
@@ -1021,62 +1108,66 @@ app.post('/api/mercadopago/webhook', async (req, res) => {
   }
 });
 
+// Auto-Withdraw Configuration Endpoints
+app.get('/api/admin/auto-withdraw-config', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+
+  res.json({ enabled: autoWithdrawEnabled });
+});
+
+app.post('/api/admin/auto-withdraw-config', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { enabled } = req.body;
+  autoWithdrawEnabled = Boolean(enabled);
+  recordAuditLog('CONFIG_CHANGE', 'WARNING', 'SYSTEM', `Configuração de Saque Automático alterada para: ${autoWithdrawEnabled ? 'ATIVO' : 'DESATIVADO'}`);
+  res.json({ success: true, enabled: autoWithdrawEnabled });
+});
+
+// Endpoint for client to poll for payment status in real-time
+app.get('/api/mercadopago/payment-status/:ref', (req, res) => {
+  const { ref } = req.params;
+  const status = realTimePaymentStatuses.get(ref);
+  
+  if (status) {
+    return res.json({ 
+      found: true, 
+      ...status,
+      // If payment was just updated, include a flag
+      isFresh: (Date.now() - status.updatedAt) < 15000 
+    });
+  }
+  
+  return res.json({ found: false, status: 'pending' });
+});
+
 // Mercado Pago: Transfer all available balance automatically via PIX key to Mercado Pago account
 app.post('/api/mercadopago/transfer-pix', async (req, res) => {
   try {
-    const { amount, projectName, beneficiaryName, pixKey } = req.body;
+    const { amount, projectName } = req.body;
     const transferAmount = Number(amount) || 0;
 
     if (transferAmount <= 0) {
       return res.status(400).json({ error: 'Nenhum valor disponível para transferência imediata.' });
     }
 
-    const mpClient = getMercadoPagoClient();
-    const targetPixKey = pixKey || '+5573998599213';
-    const targetBeneficiary = beneficiaryName || 'MAOS EM OBRA - Jose Moreira';
-
-    let transferId = `MP-PIX-TRANSFER-${Date.now()}`;
-    let transferStatus = 'approved';
-
-    if (mpClient) {
-      try {
-        const payment = new Payment(mpClient);
-        const payoutData = await payment.create({
-          body: {
-            transaction_amount: transferAmount,
-            description: `Transferência Automática PIX para conta Mercado Pago (${targetPixKey}) - ${projectName || 'Mãos em Obra'}`,
-            payment_method_id: 'pix',
-            payer: {
-              email: 'financeiro@maosemobra.com.br',
-              first_name: 'Mãos em Obra',
-              last_name: 'Tesouraria',
-            },
-            external_reference: transferId,
-          },
-        });
-        transferId = String(payoutData.id);
-        transferStatus = payoutData.status || 'approved';
-      } catch (mpErr: any) {
-        console.warn('Mercado Pago API direct transfer note (simulating instant PIX transfer to account):', mpErr?.message || mpErr);
-      }
-    }
-
-    recordAuditLog(
-      'PIX_AUTO_TRANSFER',
-      'INFO',
-      req.ip || '127.0.0.1',
-      `Transferência automática de R$ ${transferAmount.toFixed(2)} realizada via PIX (${targetPixKey}) para a conta Mercado Pago de ${targetBeneficiary}.`
-    );
+    const result = await performAutomaticTransfer(transferAmount, projectName || 'Saque Manual');
 
     return res.json({
-      success: true,
-      transferId,
-      status: transferStatus,
+      success: result.success,
+      transferId: result.transferId,
+      status: result.status,
       amount: transferAmount,
-      pixKey: targetPixKey,
-      beneficiary: targetBeneficiary,
+      pixKey: '+5573998599213',
+      beneficiary: 'MAOS EM OBRA - Jose Moreira',
       timestamp: new Date().toISOString(),
-      message: `R$ ${transferAmount.toFixed(2)} transferidos com sucesso via PIX para a conta do Mercado Pago (${targetPixKey}).`,
+      message: result.success 
+        ? `R$ ${transferAmount.toFixed(2)} transferidos com sucesso via PIX para a conta do Mercado Pago.`
+        : 'Erro ao processar transferência automática.',
     });
   } catch (error: any) {
     console.error('Error in /api/mercadopago/transfer-pix:', error);

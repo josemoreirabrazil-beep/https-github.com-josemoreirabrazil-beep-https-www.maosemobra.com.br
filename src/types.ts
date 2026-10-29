@@ -87,6 +87,7 @@ export interface ChecklistItem {
   id: string;
   text: string;
   done: boolean;
+  deadline?: string;
 }
 
 export type PhaseTaskChecklist = ChecklistItem;
@@ -333,5 +334,43 @@ export interface SubscriptionPlanPricing {
   features: string[];
   activeSubscribersCount: number;
   updatedAt: string;
+}
+
+export type OpportunityType = 'Obra Residencial' | 'Reforma' | 'Projeto' | 'Manutenção' | 'Consultoria' | 'Subempreitada';
+export type OpportunityStatus = 'Aberta' | 'Em Seleção' | 'Preenchida' | 'Cancelada';
+
+export interface ConstructionOpportunity {
+  id: string;
+  title: string;
+  location: string;
+  city: string;
+  state: string;
+  budget?: string;
+  type: OpportunityType;
+  description: string;
+  requirements: string[];
+  postedAt: string;
+  deadline?: string;
+  status: OpportunityStatus;
+  companyName: string;
+  contactName: string;
+  contactPhone: string;
+  category: string; // e.g. "Alvenaria", "Elétrica", "Pintura"
+  urgency: 'Normal' | 'Alta' | 'Crítica';
+}
+
+export type GoalType = 'Conclusão Física' | 'Economia de Orçamento' | 'Segurança/Zero Acidentes' | 'Qualidade/RDOs' | 'Outro';
+
+export interface ProjectGoal {
+  id: string;
+  projectId: string;
+  title: string;
+  type: GoalType;
+  targetValue: number; // e.g. 100 for 100% or R$ amount
+  currentValue: number;
+  unit: string; // e.g. "%", "R$", "RDOs"
+  month: string; // "YYYY-MM"
+  deadline?: string;
+  createdAt: string;
 }
 

@@ -33,6 +33,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
   const [expandedPhaseId, setExpandedPhaseId] = useState<string | null>(phases[0]?.id || null);
   const [isNewPhaseModalOpen, setIsNewPhaseModalOpen] = useState(false);
   const [newChecklistText, setNewChecklistText] = useState<{ [phaseId: string]: string }>({});
+  const [newChecklistDeadline, setNewChecklistDeadline] = useState<{ [phaseId: string]: string }>({});
 
   // New Phase Form
   const [title, setTitle] = useState('');
@@ -79,6 +80,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
       id: `check-${Date.now()}`,
       text,
       done: false,
+      deadline: newChecklistDeadline[phase.id] || undefined,
     };
 
     onUpdatePhase({
@@ -87,6 +89,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
     });
 
     setNewChecklistText(prev => ({ ...prev, [phase.id]: '' }));
+    setNewChecklistDeadline(prev => ({ ...prev, [phase.id]: '' }));
   };
 
   const handleCreatePhase = (e: React.FormEvent) => {
@@ -268,27 +271,48 @@ export const TimelineView: React.FC<TimelineViewProps> = ({
                           <span className={`text-xs font-medium flex-1 ${item.done ? 'line-through text-slate-400' : ''}`}>
                             {item.text}
                           </span>
+                          {item.deadline && (
+                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider shrink-0 ${
+                              item.done 
+                                ? 'bg-slate-100 text-slate-400' 
+                                : new Date(item.deadline) < new Date() 
+                                  ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
+                                  : 'bg-amber-500/10 text-amber-600 border border-amber-500/30'
+                            }`}>
+                              <Clock className="w-2.5 h-2.5" />
+                              {new Date(item.deadline).toLocaleDateString('pt-BR')}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
 
                     {/* Add checklist item */}
-                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <div className="flex flex-col sm:flex-row items-center gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                       <input
                         type="text"
                         placeholder="Adicionar item de verificação técnica..."
                         value={newChecklistText[phase.id] || ''}
                         onChange={(e) => setNewChecklistText({ ...newChecklistText, [phase.id]: e.target.value })}
                         onKeyDown={(e) => e.key === 'Enter' && handleAddChecklistItem(phase)}
-                        className="flex-1 px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+                        className="flex-1 px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl w-full"
                       />
-                      <button
-                        type="button"
-                        onClick={() => handleAddChecklistItem(phase)}
-                        className="px-3.5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold"
-                      >
-                        + Item
-                      </button>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <input
+                          type="date"
+                          value={newChecklistDeadline[phase.id] || ''}
+                          onChange={(e) => setNewChecklistDeadline({ ...newChecklistDeadline, [phase.id]: e.target.value })}
+                          className="px-3 py-2 text-[10px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-bold"
+                          title="Prazo da tarefa (opcional)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAddChecklistItem(phase)}
+                          className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-black shadow-xs transition"
+                        >
+                          + Item
+                        </button>
+                      </div>
                     </div>
                   </div>
 

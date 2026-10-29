@@ -27,10 +27,11 @@ import {
   Sparkles,
   Loader2
 } from 'lucide-react';
-import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest } from '../types';
+import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal } from '../types';
 import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
+import { ProjectGoals } from './ProjectGoals';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import confetti from 'canvas-confetti';
 
@@ -48,6 +49,9 @@ interface DashboardViewProps {
   onSyncDrive: () => void;
   onUpdateProject: (updatedProject: Project) => void;
   isAuthenticated: boolean;
+  goals?: ProjectGoal[];
+  onSaveGoal?: (goal: ProjectGoal) => void;
+  onDeleteGoal?: (goalId: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -64,6 +68,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onSyncDrive,
   onUpdateProject,
   isAuthenticated,
+  goals = [],
+  onSaveGoal = () => {},
+  onDeleteGoal = () => {},
 }) => {
   // Financial metrics (Separated by Real Incomes & Real Outflows)
   const totalPlanned = Number(project.budgetTotal) || 0;
@@ -124,9 +131,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     ];
   });
 
-  // Mercado Pago Quick Modal state
   const [isMpModalOpen, setIsMpModalOpen] = useState(false);
+  const [mpRefId, setMpRefId] = useState<string>('');
   const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
+  
+  const handleOpenMpModal = () => {
+    setMpRefId(`dash-${project.id}-${Date.now()}`);
+    setIsMpModalOpen(true);
+  };
   const [selectedChecklistType, setSelectedChecklistType] = useState(project.type || 'Reforma Residencial');
 
   const generateChecklist = async () => {
@@ -202,8 +214,103 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     );
   }
 
+  // 🔔 Compute Alerts & Notifications
+  const alerts: Array<{ id: string; type: 'critical' | 'warning' | 'info'; title: string; message: string; date?: string }> = [];
+  const now = new Date();
+  
+  // Phase Alerts
+  phases.forEach(phase => {
+    if (phase.status === 'Concluída') return;
+    
+    const end = new Date(phase.endDate);
+    const diffDays = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 0) {
+      alerts.push({
+        id: `phase-overdue-${phase.id}`,
+        type: 'critical',
+        title: `Etapa Atrasada: ${phase.title}`,
+        message: `O prazo encerrou em ${new Date(phase.endDate).toLocaleDateString('pt-BR')}.`,
+        date: phase.endDate
+      });
+    } else if (diffDays <= 3) {
+      alerts.push({
+        id: `phase-soon-${phase.id}`,
+        type: 'warning',
+        title: `Prazo Próximo: ${phase.title}`,
+        message: `Esta etapa vence em ${diffDays === 0 ? 'HOJE' : diffDays === 1 ? 'amanhã' : `${diffDays} dias`}.`,
+        date: phase.endDate
+      });
+    }
+    
+    // Task Checklist Alerts
+    phase.checklist.forEach(task => {
+      if (task.done || !task.deadline) return;
+      
+      const tEnd = new Date(task.deadline);
+      const tDiff = Math.ceil((tEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (tDiff < 0) {
+        alerts.push({
+          id: `task-overdue-${task.id}`,
+          type: 'critical',
+          title: `Tarefa Crítica: ${task.text}`,
+          message: `Fase: ${phase.title} • Vencida em ${new Date(task.deadline).toLocaleDateString('pt-BR')}`,
+          date: task.deadline
+        });
+      } else if (tDiff <= 2) {
+        alerts.push({
+          id: `task-soon-${task.id}`,
+          type: 'warning',
+          title: `Pendente: ${task.text}`,
+          message: `Fase: ${phase.title} • Vence em ${tDiff === 0 ? 'HOJE' : tDiff === 1 ? 'amanhã' : `${tDiff} dias`}`,
+          date: task.deadline
+        });
+      }
+    });
+  });
+
   return (
     <div className="space-y-6 pb-12">
+      
+      {/* 🔔 Sistema de Alertas e Notificações Críticas */}
+      {alerts.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+          {alerts.map(alert => (
+            <div 
+              key={alert.id}
+              className={`p-4 rounded-2xl border flex items-start gap-3 shadow-xs transition-all hover:shadow-md cursor-default ${
+                alert.type === 'critical' 
+                  ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50' 
+                  : alert.type === 'warning'
+                    ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50'
+                    : 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50'
+              }`}
+            >
+              <div className={`p-2 rounded-xl shrink-0 ${
+                alert.type === 'critical' ? 'bg-rose-500 text-white' : 'bg-amber-500 text-slate-950'
+              }`}>
+                <AlertCircle className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className={`text-xs font-black uppercase tracking-tight truncate ${
+                  alert.type === 'critical' ? 'text-rose-700 dark:text-rose-400' : 'text-amber-700 dark:text-amber-400'
+                }`}>
+                  {alert.title}
+                </h4>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 font-medium leading-tight mt-0.5">
+                  {alert.message}
+                </p>
+              </div>
+              {alert.date && (
+                <div className="text-[9px] font-black opacity-40 uppercase shrink-0 pt-1">
+                  {new Date(alert.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       
       {/* 🟢 Painel Oficial de Status Real da Plataforma */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -254,7 +361,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {/* PIX Quick QR Code & Key */}
             <button
-              onClick={() => setIsMpModalOpen(true)}
+              onClick={handleOpenMpModal}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold shadow-xs hover:bg-emerald-100 transition cursor-pointer"
               title="Chave PIX: +55 (73) 99859-9213 • Abrir QR Code"
             >
@@ -264,7 +371,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             {/* Mercado Pago Button */}
             <button
-              onClick={() => setIsMpModalOpen(true)}
+              onClick={handleOpenMpModal}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#009ee3] hover:bg-[#0082ba] text-white text-xs font-bold shadow-xs transition cursor-pointer"
               title="Gerar cobrança Pix ou Cartão via Mercado Pago"
             >
@@ -679,6 +786,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       </div>
 
+      {/* 🎯 Metas de Obra & Objetivos Mensais */}
+      <ProjectGoals 
+        projectId={project.id}
+        goals={goals}
+        onSaveGoal={onSaveGoal}
+        onDeleteGoal={onDeleteGoal}
+      />
+
       {/* Main Two-Column Lower Bento Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
@@ -910,7 +1025,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         description={`Assinatura Plano Mensal Pro (R$ 149,90) ou aporte referente ao projeto ${project.title}`}
         payerName={project.clientName || 'Cliente da Obra'}
         payerEmail={project.clientEmail || 'cliente@obra.com.br'}
-        referenceId={`dash-${project.id}-${Date.now()}`}
+        referenceId={mpRefId}
         onPaymentSuccess={() => {
           onOpenNewExpense();
         }}

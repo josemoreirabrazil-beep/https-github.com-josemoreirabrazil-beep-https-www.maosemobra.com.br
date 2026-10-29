@@ -168,6 +168,27 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   // Withdrawal & PIX Transfer State
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [withdrawalResultModal, setWithdrawalResultModal] = useState<any | null>(null);
+  const [autoWithdrawEnabled, setAutoWithdrawEnabled] = useState<boolean>(true);
+
+  const toggleAutoWithdraw = async () => {
+    try {
+      const response = await fetch('/api/admin/auto-withdraw-config', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminUser.token}` 
+        },
+        body: JSON.stringify({ enabled: !autoWithdrawEnabled }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setAutoWithdrawEnabled(data.enabled);
+        confetti({ particleCount: 20, spread: 30 });
+      }
+    } catch (err) {
+      console.error('Failed to toggle auto-withdraw', err);
+    }
+  };
 
   const handleAdminWithdrawalClick = async () => {
     const amountToWithdraw = cashflowSummary.totalCollected;
@@ -212,18 +233,21 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
     loadAllAdminData();
     const interval = setInterval(() => {
       loadAllAdminData(false);
-    }, 15000);
+    }, 6000);
     return () => clearInterval(interval);
   }, []);
 
   const loadAllAdminData = async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     try {
-      const [status, logs, cashflow, plans] = await Promise.all([
+      const [status, logs, cashflow, plans, autoConfigRes] = await Promise.all([
         fetchSecurityStatus(),
         fetchAuditLogs(adminUser.token),
         fetchSubscribersCashflow(),
         fetchSubscriptionPlans(),
+        fetch('/api/admin/auto-withdraw-config', {
+          headers: { 'Authorization': `Bearer ${adminUser.token}` }
+        }).then(r => r.json())
       ]);
       setShieldStatus(status);
       setAuditLogs(logs);
@@ -232,6 +256,9 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         setCashflowSummary(cashflow.summary);
       }
       setSubscriptionPlans(plans);
+      if (autoConfigRes && typeof autoConfigRes.enabled === 'boolean') {
+        setAutoWithdrawEnabled(autoConfigRes.enabled);
+      }
     } catch (err) {
       console.error('Error refreshing admin data', err);
     } finally {
@@ -889,6 +916,24 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                     <span>Sacar R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
                   </>
                 )}
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-4 mt-2">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-xl ${autoWithdrawEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black uppercase tracking-wider text-slate-200">Automação de Saque Imediato</h5>
+                  <p className="text-[10px] text-slate-400">Transferir automaticamente para o Mercado Pago assim que o PIX for recebido.</p>
+                </div>
+              </div>
+              <button 
+                onClick={toggleAutoWithdraw}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${autoWithdrawEnabled ? 'bg-emerald-600' : 'bg-slate-700'}`}
+              >
+                <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${autoWithdrawEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
               </button>
             </div>
 

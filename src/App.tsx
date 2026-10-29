@@ -9,6 +9,7 @@ import { CalculatorAndAIView } from './components/CalculatorAndAIView';
 import { DriveExplorerView } from './components/DriveExplorerView';
 import { TeamSuppliersView } from './components/TeamSuppliersView';
 import { ServiceRequestsView } from './components/ServiceRequestsView';
+import { OpportunitiesView } from './components/OpportunitiesView';
 import { AdminMasterView } from './components/AdminMasterView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
@@ -27,11 +28,13 @@ import {
   getTeamMembers, 
   saveTeamMembers, 
   loadServiceRequests, 
-  saveServiceRequests 
+  saveServiceRequests,
+  loadGoals,
+  saveGoals
 } from './services/storage';
 import { subscribeToAuthChanges, googleSignIn, getCachedGoogleToken } from './services/firebaseAuth';
 import { getCachedAdminSession, clearAdminSession } from './services/adminAuth';
-import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser } from './types';
+import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser, ProjectGoal } from './types';
 import confetti from 'canvas-confetti';
 
 export default function App() {
@@ -63,6 +66,7 @@ export default function App() {
   const [phases, setPhases] = useState<Phase[]>(() => getPhases(currentProject.id));
   const [team, setTeam] = useState<TeamMember[]>(() => getTeamMembers());
   const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>(() => loadServiceRequests());
+  const [goals, setGoals] = useState<ProjectGoal[]>(() => loadGoals(currentProject.id));
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
@@ -95,6 +99,7 @@ export default function App() {
     setRdos(getDailyLogs(currentProject.id));
     setExpenses(getExpenses(currentProject.id));
     setPhases(getPhases(currentProject.id));
+    setGoals(loadGoals(currentProject.id));
   }, [currentProjectId]);
 
   // Tab change handler with Admin intercept and optional team filter
@@ -275,6 +280,23 @@ export default function App() {
     handleSaveProject({ budgetTotal: Math.max(Number(currentProject.budgetTotal) || 0, budgetTotal) });
   };
 
+  const handleSaveGoal = (goal: ProjectGoal) => {
+    let updated: ProjectGoal[];
+    if (goals.some(g => g.id === goal.id)) {
+      updated = goals.map(g => g.id === goal.id ? goal : g);
+    } else {
+      updated = [goal, ...goals];
+    }
+    setGoals(updated);
+    saveGoals(currentProject.id, updated);
+  };
+
+  const handleDeleteGoal = (goalId: string) => {
+    const updated = goals.filter(g => g.id !== goalId);
+    setGoals(updated);
+    saveGoals(currentProject.id, updated);
+  };
+
   const handleRequireAuth = async () => {
     try {
       await googleSignIn();
@@ -327,6 +349,9 @@ export default function App() {
             team={team}
             user={user}
             serviceRequests={serviceRequests}
+            goals={goals}
+            onSaveGoal={handleSaveGoal}
+            onDeleteGoal={handleDeleteGoal}
             onNavigate={handleTabChange}
             onOpenNewRdo={() => setActiveTab('rdo')}
             onOpenNewExpense={() => setActiveTab('financial')}
@@ -334,6 +359,10 @@ export default function App() {
             onUpdateProject={handleSaveProject}
             isAuthenticated={isAuthenticated}
           />
+        )}
+        
+        {activeTab === 'opportunities' && (
+          <OpportunitiesView />
         )}
 
         {activeTab === 'admin' && adminUser && (

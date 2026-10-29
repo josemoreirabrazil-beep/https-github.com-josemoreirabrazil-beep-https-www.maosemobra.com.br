@@ -106,6 +106,34 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
     return () => clearInterval(timer);
   }, [isOpen, pixData, isApproved, timeLeft]);
 
+  // 🔔 Real-time status polling (Automated Checkout Transparente)
+  useEffect(() => {
+    if (!isOpen || isApproved || !referenceId) return;
+
+    let pollInterval: NodeJS.Timeout;
+
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`/api/mercadopago/payment-status/${referenceId}`);
+        const data = await response.json();
+        
+        if (data.found && data.status === 'approved') {
+          triggerSuccess(activeTab.toUpperCase());
+        }
+      } catch (e) {
+        console.error('Polling error', e);
+      }
+    };
+
+    // Initial check and then every 4 seconds
+    pollStatus();
+    pollInterval = setInterval(pollStatus, 4000);
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [isOpen, isApproved, referenceId, activeTab]);
+
   const loadConfigAndData = async (targetAmount: number) => {
     try {
       setLoading(true);

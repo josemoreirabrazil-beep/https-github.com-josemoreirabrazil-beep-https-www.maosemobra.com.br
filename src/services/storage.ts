@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   TEAM: 'maos_em_obra_team',
   SERVICE_REQUESTS: 'maos_em_obra_service_requests',
   PROPOSALS: 'maos_em_obra_proposals',
+  GOALS: 'maos_em_obra_goals',
 };
 
 export const INITIAL_SERVICE_REQUESTS: ServiceRequest[] = [];
@@ -254,6 +255,30 @@ export function loadProposals(): ProposalQuote[] {
 export function saveProposals(proposals: ProposalQuote[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.PROPOSALS, JSON.stringify(proposals));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+export function loadGoals(projectId?: string): import('../types').ProjectGoal[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.GOALS);
+    const allGoals: import('../types').ProjectGoal[] = raw ? JSON.parse(raw) : [];
+    if (projectId) {
+      return allGoals.filter(g => g.projectId === projectId);
+    }
+    return allGoals;
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveGoals(projectId: string, goals: import('../types').ProjectGoal[]): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.GOALS);
+    const allGoals: import('../types').ProjectGoal[] = raw ? JSON.parse(raw) : [];
+    const otherGoals = allGoals.filter(g => g.projectId !== projectId);
+    localStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify([...otherGoals, ...goals]));
   } catch (e) {
     console.error(e);
   }

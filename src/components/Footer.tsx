@@ -123,6 +123,16 @@ export const Footer: React.FC<FooterProps> = ({
               <Briefcase className="w-3.5 h-3.5 text-purple-400" />
               <span>Técnicos & Projetistas ({technicalCount})</span>
             </button>
+            
+            {/* Oportunidades Link */}
+            <button
+              onClick={() => onNavigate('opportunities')}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold border border-slate-700 hover:border-amber-500/50 transition cursor-pointer flex items-center gap-1.5"
+              title="Ver mercado de oportunidades e vagas em obras"
+            >
+              <Briefcase className="w-3.5 h-3.5 text-amber-500" />
+              <span>Oportunidades</span>
+            </button>
 
             {/* Baixar App Link */}
             {onOpenInstallModal && (
@@ -308,6 +318,18 @@ export const Footer: React.FC<FooterProps> = ({
                 >
                   <Truck className="w-3.5 h-3.5 text-teal-400" />
                   <span>Solicitações & Logística</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onNavigate('opportunities')}
+                  className="hover:text-amber-400 transition cursor-pointer flex items-center gap-1.5 text-slate-300"
+                >
+                  <Briefcase className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Mercado de Oportunidades</span>
+                  <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-bold border border-amber-500/20">
+                    NOVO
+                  </span>
                 </button>
               </li>
             </ul>

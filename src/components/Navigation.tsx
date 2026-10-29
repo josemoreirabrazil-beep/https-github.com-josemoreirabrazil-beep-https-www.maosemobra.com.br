@@ -10,10 +10,11 @@ import {
   Send,
   Truck,
   ShieldCheck,
-  Download
+  Download,
+  Briefcase
 } from 'lucide-react';
 
-export type NavTab = 'dashboard' | 'requests' | 'rdo' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'admin';
+export type NavTab = 'dashboard' | 'opportunities' | 'requests' | 'rdo' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'admin';
 
 interface NavigationProps {
   activeTab: NavTab;
@@ -39,6 +40,12 @@ export const Navigation: React.FC<NavigationProps> = ({
       id: 'dashboard' as NavTab,
       label: 'Painel Geral',
       icon: LayoutDashboard,
+    },
+    {
+      id: 'opportunities' as NavTab,
+      label: 'Oportunidades',
+      icon: Briefcase,
+      highlight: true,
     },
     {
       id: 'requests' as NavTab,
