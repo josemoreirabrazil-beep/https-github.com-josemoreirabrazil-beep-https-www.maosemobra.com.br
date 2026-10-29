@@ -42,6 +42,7 @@ import {
 } from './services/storage';
 import { subscribeToAuthChanges, googleSignIn, getCachedGoogleToken } from './services/firebaseAuth';
 import { getCachedAdminSession, clearAdminSession } from './services/adminAuth';
+import { usePushNotifications } from './hooks/usePushNotifications';
 import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser, ProjectGoal } from './types';
 import confetti from 'canvas-confetti';
 
@@ -89,13 +90,13 @@ export default function App() {
   // 🔔 Webhook / Retorno Automático do Mercado Pago State
   const [webhookNotification, setWebhookNotification] = useState<WebhookProcessResult | null>(null);
 
-  // Admin Master Global State
-  const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
-  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
-
   // Auth / Google Drive State
   const [user, setUser] = useState<any>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+
+  // Admin Master Global State
+  const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
+  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
 
   // Listen to Firebase Auth
   useEffect(() => {
@@ -105,6 +106,29 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // 🚀 Firebase Cloud Messaging Push Notifications Hook
+  const { requestPermission, latestNotification } = usePushNotifications();
+
+  // Auto request permission on first authenticated session
+  useEffect(() => {
+    if (isAuthenticated) {
+      requestPermission().catch(() => {});
+    }
+  }, [isAuthenticated]);
+
+  // Display banner when FCM notification arrives
+  useEffect(() => {
+    if (latestNotification) {
+      setWebhookNotification({
+        success: true,
+        message: `${latestNotification.title}: ${latestNotification.body}`,
+        status: 'Aprovado',
+      });
+      const timer = setTimeout(() => setWebhookNotification(null), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [latestNotification]);
 
   // When project changes, refresh the data collections
   useEffect(() => {
