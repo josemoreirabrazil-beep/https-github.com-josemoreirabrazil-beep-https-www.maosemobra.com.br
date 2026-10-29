@@ -94,3 +94,14 @@ export async function simulatePushNotification(payload: PushNotificationPayload)
     return false;
   }
 }
+
+/**
+ * Dispatches a push notification regarding project status changes
+ */
+export async function sendProjectStatusPushNotification(projectTitle: string, newStatus: string): Promise<boolean> {
+  return simulatePushNotification({
+    title: `Atualização de Obra: ${projectTitle}`,
+    body: `O status do projeto foi alterado para: "${newStatus}". Acompanhe os detalhes no app.`,
+  });
+}
+
