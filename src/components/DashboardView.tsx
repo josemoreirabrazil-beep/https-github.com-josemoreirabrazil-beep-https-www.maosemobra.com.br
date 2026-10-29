@@ -463,11 +463,13 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               <span>{onlineCount} On-line</span>
             </div>
 
-            {/* Quantidade Inscrito */}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs font-bold">
-              <Users className="w-3.5 h-3.5" />
-              <span>{registeredCount} Inscritos / Cadastrados</span>
-            </div>
+            {/* Quantidade Inscrito (Apenas visível se Admin Master autenticado) */}
+            {props.adminUser && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs font-bold">
+                <Users className="w-3.5 h-3.5" />
+                <span>{registeredCount} Inscritos / Cadastrados</span>
+              </div>
+            )}
 
             {/* Admin Master Global Access Button */}
             <button

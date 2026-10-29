@@ -199,10 +199,6 @@ export const Footer: React.FC<FooterProps> = ({
                   {currentProject.title}
                 </button>
               </div>
-              <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                <span>Inscritos Totais na Plataforma:</span>
-                <span className="font-bold text-emerald-400">{totalRegistered} cadastrados</span>
-              </div>
             </div>
 
             {/* Launch Promo Badge & Official Link */}
