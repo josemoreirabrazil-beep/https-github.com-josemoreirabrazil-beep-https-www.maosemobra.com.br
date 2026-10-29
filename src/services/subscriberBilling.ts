@@ -18,7 +18,7 @@ const INITIAL_PLANS: SubscriptionPlanPricing[] = [
     billingCycle: 'Mensal',
     targetAudience: 'Prestadores, Técnicos, Lojas e Profissionais Independentes',
     features: ['Obras ilimitadas', 'RDOs e Diárias digitais', 'Controle financeiro de caixa', 'Suporte prioritário via WhatsApp'],
-    activeSubscribersCount: 14,
+    activeSubscribersCount: 3,
     updatedAt: new Date().toISOString().split('T')[0],
   },
   {
@@ -29,7 +29,7 @@ const INITIAL_PLANS: SubscriptionPlanPricing[] = [
     billingCycle: 'Anual',
     targetAudience: 'Construtoras, Empreiteiras e Incorporadoras',
     features: ['2 meses grátis (economia de R$ 300)', 'Exportação de relatórios avançados (PDF/Excel)', 'Backup em nuvem dedicado', 'Até 5 subcontas de engenheiros/mestres'],
-    activeSubscribersCount: 6,
+    activeSubscribersCount: 1,
     updatedAt: new Date().toISOString().split('T')[0],
   },
   {
@@ -40,7 +40,7 @@ const INITIAL_PLANS: SubscriptionPlanPricing[] = [
     billingCycle: 'Por Uso',
     targetAudience: 'Profissionais avulsos e orçamentistas',
     features: ['Liberação pontual por obra/proposta enviada', 'Sem mensalidade fixa', 'Acesso completo às ferramentas da obra'],
-    activeSubscribersCount: 9,
+    activeSubscribersCount: 1,
     updatedAt: new Date().toISOString().split('T')[0],
   },
   {
@@ -51,19 +51,21 @@ const INITIAL_PLANS: SubscriptionPlanPricing[] = [
     billingCycle: 'Gratuito',
     targetAudience: 'Clientes solicitantes e novos usuários da fase de lançamento',
     features: ['Cadastros de projetos iniciais', 'Envio de solicitações para prestadores', 'Acesso à vitrine de lojas'],
-    activeSubscribersCount: 22,
+    activeSubscribersCount: 2,
     updatedAt: new Date().toISOString().split('T')[0],
   }
 ];
 
 export async function fetchSubscriptionPlans(): Promise<SubscriptionPlanPricing[]> {
   try {
+    const payments = getStoredPayments();
     const raw = localStorage.getItem(PLANS_STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(PLANS_STORAGE_KEY, JSON.stringify(INITIAL_PLANS));
-      return INITIAL_PLANS;
-    }
-    return JSON.parse(raw);
+    let plans: SubscriptionPlanPricing[] = raw ? JSON.parse(raw) : INITIAL_PLANS;
+    // Computa dinamicamente só e somente os dados reais de assinantes inscritos
+    return plans.map(p => ({
+      ...p,
+      activeSubscribersCount: payments.filter(sub => sub.planType === p.code || sub.planType === p.name).length
+    }));
   } catch {
     return INITIAL_PLANS;
   }

@@ -22,6 +22,7 @@ import {
 import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';
 import { exportProjectToDrive } from '../services/googleDrive';
+import { LanguageSelector } from './LanguageSelector';
 import confetti from 'canvas-confetti';
 
 interface HeaderProps {
@@ -226,8 +227,11 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Action Tools & Google Drive Sync */}
+          {/* Action Tools, Multilingual Menu & Google Drive Sync */}
           <div className="flex items-center gap-2 sm:gap-3">
+
+            {/* 🌐 BOTÃO MENU MULTILÍNGUES SEMPRE VISÍVEL */}
+            <LanguageSelector variant="header" showLabel={true} />
 
             {/* 🔥 BOTÃO OFICIAL DE SAQUE R$ 1.834,80 P/ MERCADO PAGO 🔥 */}
             <button

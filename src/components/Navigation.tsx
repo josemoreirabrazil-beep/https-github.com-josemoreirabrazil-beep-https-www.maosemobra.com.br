@@ -13,6 +13,7 @@ import {
   Download,
   Briefcase
 } from 'lucide-react';
+import { LanguageSelector } from './LanguageSelector';
 
 export type NavTab = 'dashboard' | 'opportunities' | 'invitations' | 'requests' | 'rdo' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'admin';
 
@@ -177,6 +178,11 @@ export const Navigation: React.FC<NavigationProps> = ({
               <span>Baixar App</span>
             </button>
           )}
+
+          {/* 🌐 BOTÃO MENU MULTILÍNGUES VISÍVEL */}
+          <div className="shrink-0">
+            <LanguageSelector variant="nav" showLabel={true} />
+          </div>
         </div>
       </div>
     </nav>

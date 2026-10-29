@@ -17,7 +17,13 @@ import { Footer } from './components/Footer';
 import { ProjectModal } from './components/ProjectModal';
 import { InstallAppModal } from './components/InstallAppModal';
 import { WithdrawalModal } from './components/WithdrawalModal';
-import { Download } from 'lucide-react';
+import { Download, CheckCircle2, X, Megaphone, ExternalLink } from 'lucide-react';
+import { 
+  parseMercadoPagoRedirectParams, 
+  processMercadoPagoRedirectReturn, 
+  startAutomaticWebhookSync,
+  type WebhookProcessResult 
+} from './services/webhookHandler';
 import { 
   getProjects, 
   saveProjects, 
@@ -80,6 +86,9 @@ export default function App() {
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [isWithdrawalModalOpen, setIsWithdrawalModalOpen] = useState(false);
 
+  // 🔔 Webhook / Retorno Automático do Mercado Pago State
+  const [webhookNotification, setWebhookNotification] = useState<WebhookProcessResult | null>(null);
+
   // Admin Master Global State
   const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
   const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
@@ -105,48 +114,67 @@ export default function App() {
     setGoals(loadGoals(currentProject.id));
   }, [currentProjectId]);
 
-  // 🔄 Background Automated Payment Sync (Observador Master)
+  // 🔔 1. Processamento Automático do Retorno do Mercado Pago via URL / Redirecionamento
+  useEffect(() => {
+    const mpRedirect = parseMercadoPagoRedirectParams();
+    if (mpRedirect) {
+      processMercadoPagoRedirectReturn(mpRedirect, {
+        currentProjectId: currentProject.id,
+        expenses,
+        onUpdateExpenses: (updated) => setExpenses(updated),
+        serviceRequests,
+        onUpdateServiceRequests: (updated) => setServiceRequests(updated),
+      }).then((result) => {
+        setWebhookNotification(result);
+        const timer = setTimeout(() => {
+          setWebhookNotification(null);
+        }, 12000);
+        return () => clearTimeout(timer);
+      }).catch(err => {
+        console.error('Erro ao processar retorno automático do Mercado Pago:', err);
+      });
+    }
+  }, [currentProject.id]);
+
+  // 🔄 2. Background Automated Payment Sync com Webhook (Observador Master)
   useEffect(() => {
     const pendingExpenses = expenses.filter(e => e.status !== 'Pago');
     if (pendingExpenses.length === 0) return;
 
-    const interval = setInterval(async () => {
-      let updatedAny = false;
-      const newExpenses = [...expenses];
-
-      for (let i = 0; i < newExpenses.length; i++) {
-        const exp = newExpenses[i];
-        if (exp.status === 'Pago') continue;
-
-        try {
-          // Check if this specific reference was approved in the server's realTimePaymentStatuses
-          const response = await fetch(`/api/mercadopago/payment-status/${exp.id}`);
-          const data = await response.json();
-
-          if (data.found && data.status === 'approved') {
-            newExpenses[i] = {
+    const stopSync = startAutomaticWebhookSync({
+      projectId: currentProject.id,
+      getPendingExpenseIds: () => expenses.filter(e => e.status !== 'Pago').map(e => e.id),
+      onExpenseApproved: (expenseId, amount) => {
+        const newExpenses = expenses.map(exp => {
+          if (exp.id === expenseId && exp.status !== 'Pago') {
+            return {
               ...exp,
-              status: 'Pago',
-              actualAmount: data.amount || exp.actualAmount || exp.plannedAmount,
+              status: 'Pago' as const,
+              actualAmount: amount || exp.actualAmount || exp.plannedAmount,
               invoiceNumber: exp.invoiceNumber || `AUTO-MP-${Date.now()}`,
-              supplier: exp.supplier ? `${exp.supplier} (Sync)` : 'Mercado Pago (Auto)',
-              date: new Date().toISOString().split('T')[0]
+              supplier: exp.supplier ? `${exp.supplier} (Webhook)` : 'Mercado Pago (Auto Sync)',
+              date: new Date().toISOString().split('T')[0],
             };
-            updatedAny = true;
           }
-        } catch (e) {
-          // Silent fail for background poll
-        }
-      }
+          return exp;
+        });
 
-      if (updatedAny) {
         setExpenses(newExpenses);
         saveExpenses(currentProject.id, newExpenses);
-        confetti({ particleCount: 30, spread: 50, origin: { y: 0.8 } });
-      }
-    }, 10000); // Check every 10 seconds
 
-    return () => clearInterval(interval);
+        setWebhookNotification({
+          success: true,
+          message: `Despesa ${expenseId} atualizada para Paga via sincronização de Webhook!`,
+          status: 'Aprovado',
+          updatedExpensesCount: 1,
+        });
+
+        confetti({ particleCount: 35, spread: 50, origin: { y: 0.8 } });
+      },
+      intervalMs: 8000,
+    });
+
+    return () => stopSync();
   }, [expenses, currentProject.id]);
 
   // Tab change handler with Admin intercept and optional team filter
@@ -386,6 +414,85 @@ export default function App() {
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
       />
+
+      {/* 🔔 Banner de Confirmação Automática de Webhook Mercado Pago */}
+      {webhookNotification && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 w-full animate-fade-in">
+          <div className={`p-4 rounded-2xl border shadow-lg flex items-center justify-between gap-3 ${
+            webhookNotification.status === 'Aprovado' 
+              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-950 dark:text-emerald-200' 
+              : (webhookNotification.status === 'Rejeitado'
+                ? 'bg-rose-500/15 border-rose-500/40 text-rose-950 dark:text-rose-200'
+                : 'bg-amber-500/15 border-amber-500/40 text-amber-950 dark:text-amber-200')
+          }`}>
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-xl shrink-0 ${
+                webhookNotification.status === 'Aprovado' 
+                  ? 'bg-emerald-500 text-white' 
+                  : (webhookNotification.status === 'Rejeitado' ? 'bg-rose-500 text-white' : 'bg-amber-500 text-slate-950')
+              }`}>
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xs font-black uppercase tracking-wider flex items-center gap-2">
+                  <span>Notificação do Mercado Pago Processada Automaticamente</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500 text-white font-black">
+                    Webhook Ativo
+                  </span>
+                </div>
+                <p className="text-xs font-semibold mt-0.5">
+                  {webhookNotification.message}
+                </p>
+                {(webhookNotification.updatedExpensesCount || webhookNotification.updatedServiceRequestsCount) ? (
+                  <p className="text-[11px] opacity-80 mt-0.5 font-bold">
+                    {webhookNotification.updatedExpensesCount ? `• ${webhookNotification.updatedExpensesCount} despesa(s) marcada(s) como Paga` : ''}
+                    {webhookNotification.updatedServiceRequestsCount ? ` • ${webhookNotification.updatedServiceRequestsCount} solicitação(ões) aprovada(s)` : ''}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+            <button
+              onClick={() => setWebhookNotification(null)}
+              className="p-1.5 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 transition cursor-pointer text-current"
+              title="Fechar notificação"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 📢 COMUNICADO OFICIAL PARA ASSINANTES & VISITANTES */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 w-full">
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-amber-950 to-slate-900 border-2 border-amber-500/80 text-white shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500 text-slate-950 rounded-xl font-black shrink-0">
+              <Megaphone className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-2">
+                <span>Comunicado Oficial Mãos em Obra</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-slate-950">
+                  Portal Oficial
+                </span>
+              </div>
+              <p className="text-xs text-slate-200 mt-0.5 font-medium">
+                Seja bem-vindo ao aplicativo oficial <strong>Mãos em Obra</strong>. Acesse a plataforma completa para gestão de obras, orçamentos e oportunidades no endereço oficial:
+              </p>
+            </div>
+          </div>
+
+          <a
+            href="https://www.maosemobra.com.br"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95 shrink-0 cursor-pointer w-full md:w-auto"
+          >
+            <span>Acessar www.maosemobra.com.br</span>
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
+      </div>
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">

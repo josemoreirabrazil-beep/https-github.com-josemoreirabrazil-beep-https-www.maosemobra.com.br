@@ -848,9 +848,9 @@ app.get('/api/admin/subscribers-cashflow', (req, res) => {
 
   res.json({
     summary: {
-      totalCollected: totalCollected > 0 ? totalCollected : 1834.80,
-      pendingAmount,
-      monthlyRecurringRevenue,
+      totalCollected: Number(totalCollected.toFixed(2)),
+      pendingAmount: Number(pendingAmount.toFixed(2)),
+      monthlyRecurringRevenue: Number(monthlyRecurringRevenue.toFixed(2)),
       totalSubscribers,
       activePaidSubscribers,
       freeTierSubscribers,

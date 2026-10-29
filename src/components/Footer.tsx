@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import type { NavTab } from './Navigation';
 import type { Project, TeamMember, ServiceRequest } from '../types';
+import { LanguageSelector } from './LanguageSelector';
 
 interface FooterProps {
   currentProject: Project;
@@ -204,10 +205,23 @@ export const Footer: React.FC<FooterProps> = ({
               </div>
             </div>
 
-            {/* Launch Promo Badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold">
-              <HeartHandshake className="w-4 h-4" />
-              <span>Inscrição Gratuita de Lançamento (Clientes & Prestadores)</span>
+            {/* Launch Promo Badge & Official Link */}
+            <div className="flex flex-col gap-2 pt-1">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold">
+                <HeartHandshake className="w-4 h-4 shrink-0" />
+                <span>Inscrição Gratuita de Lançamento (Clientes & Prestadores)</span>
+              </div>
+
+              <a
+                href="https://www.maosemobra.com.br"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-between px-3.5 py-2 rounded-xl bg-slate-950 border border-amber-500/40 text-amber-400 hover:bg-slate-800 text-xs font-black shadow-md transition cursor-pointer"
+                title="Acessar o site oficial do Mãos em Obra (www.maosemobra.com.br)"
+              >
+                <span>🌐 www.maosemobra.com.br</span>
+                <ExternalLink className="w-3.5 h-3.5 ml-1" />
+              </a>
             </div>
           </div>
 
@@ -416,11 +430,14 @@ export const Footer: React.FC<FooterProps> = ({
 
         {/* Bottom Copyright & Security Line */}
         <div className="mt-12 pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <span>© {new Date().getFullYear()} Mãos em Obra • Todos os direitos reservados.</span>
+            <div className="shrink-0">
+              <LanguageSelector variant="footer" showLabel={true} />
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 text-[11px]">
+          <div className="flex flex-wrap items-center gap-4 text-[11px]">
             <span className="flex items-center gap-1 text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
               Sistema Blindado contra Invasão Externa (WAF & TLS 1.3)

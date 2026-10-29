@@ -727,6 +727,19 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
           {/* Quick Actions */}
           <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0">
+            {/* ⚡ BOTÃO DE SAQUE IMEDIATO DE R$ 1.834,80 PARA O ADMIN MASTER ⚡ */}
+            <button
+              onClick={handleAdminWithdrawalClick}
+              disabled={isWithdrawing || cashflowSummary.totalCollected <= 0}
+              className="px-4 py-3 bg-gradient-to-r from-emerald-500 via-teal-500 to-[#009ee3] hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-xl border border-emerald-300 transition cursor-pointer active:scale-95"
+              title="Disparo de Saque Imediato R$ 1.834,80 via PIX para Mercado Pago"
+            >
+              <Wallet className="w-4 h-4 text-slate-950" />
+              <span>
+                {isWithdrawing ? 'Transferindo R$ 1.834,80...' : 'Sacar R$ 1.834,80 Imediato (PIX)'}
+              </span>
+            </button>
+
             <button
               onClick={() => handleOpenPaymentModal()}
               className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer"
@@ -773,6 +786,47 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               <span>Bloquear / Sair Master</span>
             </button>
           </div>
+        </div>
+
+        {/* ⚡ BANNER PERMANENTE DE SAQUE IMEDIATO R$ 1.834,80 (DISPARO ONLINE EM TEMPO REAL) ⚡ */}
+        <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border-2 border-emerald-500 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-emerald-500 text-slate-950 rounded-2xl font-black shrink-0">
+              <Zap className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                <span>Disparo Online de Saque Imediato em Tempo Real</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-slate-950">
+                  PIX Instantâneo
+                </span>
+              </div>
+              <p className="text-sm font-black text-white mt-0.5">
+                Saldo Arrecadado Liberado: <span className="text-emerald-400 font-extrabold">R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              </p>
+              <p className="text-[11px] text-slate-300">
+                Destino: Mercado Pago (Banco 323) • Titular: <strong>{MASTER_CREDENTIALS.name}</strong> • Chave PIX: <strong>{MASTER_CREDENTIALS.pixKey}</strong>
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleAdminWithdrawalClick}
+            disabled={isWithdrawing || cashflowSummary.totalCollected <= 0}
+            className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95 cursor-pointer disabled:opacity-50 shrink-0"
+          >
+            {isWithdrawing ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Processando Disparo PIX...</span>
+              </>
+            ) : (
+              <>
+                <ArrowUpRight className="w-4 h-4" />
+                <span>Disparar Saque Imediato de R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Scan Result Alert */}
@@ -883,13 +937,13 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       {/* ======================================================== */}
       {activeSubTab === 'cashflow' && (
         <div className="space-y-6">
-          {/* Top KPI Cards */}
+          {/* Top KPI Cards - Só e somente dados reais */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Caixa Total Arrecadado */}
+            {/* 1. FATURAMENTO BRUTO */}
             <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Caixa Arrecadado (Assinaturas)
+                <span className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Faturamento Bruto
                 </span>
                 <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
                   <DollarSign className="w-5 h-5" />
@@ -898,66 +952,67 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
                 R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1 font-bold">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Recebido via PIX & Mercado Pago</span>
+                <span>Total Bruto Arrecadado & Liquidado</span>
               </div>
             </div>
 
-            {/* MRR Recorrente */}
+            {/* 2. DISPONÍVEL PARA SAQUE IMEDIATO */}
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-950/20 to-slate-900 border-2 border-emerald-500/40 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-black text-emerald-400 uppercase tracking-wider">
+                  Disponível p/ Saque Imediato
+                </span>
+                <span className="p-2 rounded-xl bg-emerald-500/20 text-emerald-300">
+                  <Wallet className="w-5 h-5" />
+                </span>
+              </div>
+              <div className="text-2xl font-black text-white">
+                R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[11px] text-emerald-300 mt-1 flex items-center gap-1 font-bold">
+                <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" />
+                <span>100% Liberado p/ PIX Mercado Pago</span>
+              </div>
+            </div>
+
+            {/* 3. VALORES A RECEBER (PENDENTES) */}
             <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Receita Mensal Recorrente (MRR)
+                <span className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Valores a Receber
                 </span>
                 <span className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
-                  <TrendingUp className="w-5 h-5" />
-                </span>
-              </div>
-              <div className="text-2xl font-black text-slate-900 dark:text-white">
-                R$ {cashflowSummary.monthlyRecurringRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                ARR Projetado: R$ {(cashflowSummary.monthlyRecurringRevenue * 12).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} /ano
-              </div>
-            </div>
-
-            {/* Assinantes Pagantes vs Gratuidade */}
-            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Assinantes da Plataforma
-                </span>
-                <span className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
-                  <Users className="w-5 h-5" />
-                </span>
-              </div>
-              <div className="text-2xl font-black text-slate-900 dark:text-white">
-                {cashflowSummary.activePaidSubscribers} Pagantes
-              </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between">
-                <span>Total: {cashflowSummary.totalSubscribers}</span>
-                <span className="text-emerald-500 font-bold">{cashflowSummary.freeTierSubscribers} Grátis Lançamento</span>
-              </div>
-            </div>
-
-            {/* Pendente & Atrasado */}
-            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Valores a Receber / Pendentes
-                </span>
-                <span className="p-2 rounded-xl bg-rose-500/10 text-rose-500">
                   <AlertTriangle className="w-5 h-5" />
                 </span>
               </div>
               <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
                 R$ {cashflowSummary.pendingAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
-              <div className="text-[11px] text-rose-500 font-bold mt-1">
+              <div className="text-[11px] text-amber-600 dark:text-amber-400 font-bold mt-1">
                 {cashflowSummary.overdueSubscribers > 0 
                   ? `${cashflowSummary.overdueSubscribers} fatura(s) com atraso` 
-                  : 'Nenhuma fatura em atraso'}
+                  : 'Cobranças emitidas em aberto'}
+              </div>
+            </div>
+
+            {/* 4. CLIENTES ASSINANTES REAIS */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Clientes Assinantes Reais
+                </span>
+                <span className="p-2 rounded-xl bg-blue-500/10 text-blue-500">
+                  <Users className="w-5 h-5" />
+                </span>
+              </div>
+              <div className="text-2xl font-black text-slate-900 dark:text-white">
+                {cashflowSummary.totalSubscribers} Assinantes
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between font-bold">
+                <span className="text-emerald-500">{cashflowSummary.activePaidSubscribers} Pagantes Ativos</span>
+                <span className="text-blue-500">{cashflowSummary.freeTierSubscribers} Isentos</span>
               </div>
             </div>
           </div>
@@ -1190,7 +1245,9 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                       <td className="py-3.5 px-3">
                         <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                           <Users className="w-3.5 h-3.5 text-amber-500" />
-                          <span>{plan.activeSubscribersCount} ativos</span>
+                          <span>
+                            {subscriberPayments.filter(s => s.planType === plan.code || s.planType === plan.name).length} assinante(s)
+                          </span>
                         </div>
                       </td>
 

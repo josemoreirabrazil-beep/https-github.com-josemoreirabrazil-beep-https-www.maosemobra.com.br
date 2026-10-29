@@ -29,7 +29,8 @@ import {
   Activity,
   RefreshCw,
   Briefcase,
-  Send
+  Send,
+  ExternalLink
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser } from '../types';
 import type { NavTab } from './Navigation';
@@ -394,6 +395,43 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
         </div>
       )}
       
+      {/* 📢 COMUNICADO OFICIAL PARA ASSINANTES E VISITANTES */}
+      <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 text-slate-950 rounded-3xl p-5 sm:p-6 shadow-lg border border-amber-400/50 relative overflow-hidden">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
+          <div className="flex items-start gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-slate-950 text-amber-400 flex items-center justify-center font-black shrink-0 shadow-md">
+              <Building2 className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="bg-slate-950 text-amber-400 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest">
+                  COMUNICADO OFICIAL
+                </span>
+                <span className="text-xs font-black text-slate-950 opacity-90">
+                  Mãos em Obra • App Web Oficial
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-slate-950 mt-1 tracking-tight">
+                Seja bem-vindo ao Aplicativo Mãos em Obra (www.maosemobra.com.br)
+              </h2>
+              <p className="text-xs sm:text-sm font-semibold text-slate-900/90 leading-relaxed mt-1 max-w-3xl">
+                Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO, acompanhe fluxo de caixa, solide orçamentos de insumos com frete/mobilização e efetue saques imediatos via PIX.
+              </p>
+            </div>
+          </div>
+
+          <a
+            href="https://www.maosemobra.com.br"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-5 py-3 rounded-2xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-black text-xs sm:text-sm flex items-center gap-2 shadow-xl transition cursor-pointer shrink-0 border border-amber-400/40 hover:scale-105 active:scale-95"
+          >
+            <span>ACESSAR MAOSEMOBRA.COM.BR</span>
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
+      </div>
+
       {/* 🟢 Painel Oficial de Status Real da Plataforma */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
