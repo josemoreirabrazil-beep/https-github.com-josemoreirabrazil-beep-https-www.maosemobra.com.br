@@ -234,10 +234,11 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
       if (res.status === 'approved') {
         triggerSuccess('PIX');
       } else {
-        alert('Pagamento ainda não identificado no Mercado Pago. Se já realizou a transferência via PIX, confirme no botão abaixo para dar baixa no sistema.');
+        setError('Aguardando compensação do pagamento no Mercado Pago. Se já realizou o PIX, aguarde alguns instantes ou confirme manualmente abaixo.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setError(err?.message || 'Erro ao consultar status');
     } finally {
       setLoading(false);
     }

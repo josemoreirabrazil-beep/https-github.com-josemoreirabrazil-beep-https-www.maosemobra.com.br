@@ -522,14 +522,20 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           {/* Disponível em Caixa */}
           <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                Disponível em Caixa (Saldo Real)
-              </span>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Disponível em Caixa (Saldo Real)
+                </span>
+                <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Auto-Saque PIX Ativo
+                </span>
+              </div>
               <div className={`text-2xl font-black ${availableCash >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                 R$ {availableCash.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <span className="text-[10px] text-slate-400 mt-1 block">
-                {availableCash >= 0 ? 'Superávit de caixa disponível' : 'Déficit no saldo operacional'}
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-1 block">
+                Repasse imediato de todo valor recebido p/ conta Mercado Pago via PIX (+55 73 99859-9213)
               </span>
             </div>
 

@@ -144,3 +144,59 @@ export async function batchCreateMercadoPagoPreferences(items: Array<{
   return response.json();
 }
 
+export interface AutoTransferItem {
+  id: string;
+  transferId: string;
+  amount: number;
+  pixKey: string;
+  beneficiary: string;
+  cpf: string;
+  destination: string;
+  status: string;
+  timestamp: string;
+  qrCode: string;
+  origin: string;
+  message: string;
+}
+
+export interface AutoTransfersStatusResponse {
+  enabled: boolean;
+  targetPixKey: string;
+  beneficiary: string;
+  cpf: string;
+  destination: string;
+  rule: string;
+  totalTransferred: number;
+  recentCount: number;
+  history: AutoTransferItem[];
+}
+
+export async function getAutoTransfersHistory(): Promise<AutoTransfersStatusResponse> {
+  const response = await fetch('/api/mercadopago/auto-transfers-history');
+  if (!response.ok) {
+    throw new Error('Falha ao consultar histórico de transferências automáticas');
+  }
+  return response.json();
+}
+
+export async function triggerAutoSweep(amount?: number, reason?: string): Promise<{
+  success: boolean;
+  sweepAmount: number;
+  transfer: any;
+  history: AutoTransferItem[];
+  message: string;
+}> {
+  const response = await fetch('/api/mercadopago/auto-sweep', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount, reason }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao executar varredura automática de saldo');
+  }
+
+  return response.json();
+}
+
