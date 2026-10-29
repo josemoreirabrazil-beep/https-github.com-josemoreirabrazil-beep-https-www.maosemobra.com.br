@@ -154,13 +154,17 @@ export const Navigation: React.FC<NavigationProps> = ({
             })}
           </div>
 
-          {/* 🔥 BOTÃO DE SAQUE R$ 1.834,80 SEMPRE VISÍVEL E FIXADO AO LADO 🔥 */}
+          {/* 🔥 BOTÃO DE SAQUE R$ 1.834,80 COM ANIMAÇÃO DE PULSAÇÃO SUAVE E STATUS DE SALDO POSITIVO 🔥 */}
           {onOpenWithdrawalModal && (
             <button
               onClick={onOpenWithdrawalModal}
               title="Sacar R$ 1.834,80 via PIX p/ Mercado Pago"
-              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/20 transition whitespace-nowrap shrink-0 cursor-pointer active:scale-95 border border-emerald-400/40"
+              className="relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/20 transition whitespace-nowrap shrink-0 cursor-pointer active:scale-95 border border-emerald-400/50 animate-pulse"
             >
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-400"></span>
+              </span>
               <Wallet className="w-3.5 h-3.5 text-emerald-200" />
               <span className="hidden sm:inline">Sacar R$ 1.834,80 p/ MP</span>
               <span className="sm:hidden">Sacar R$ 1.834,80</span>

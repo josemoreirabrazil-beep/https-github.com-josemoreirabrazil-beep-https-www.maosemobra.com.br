@@ -23,6 +23,7 @@ import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';
 import { exportProjectToDrive } from '../services/googleDrive';
 import { LanguageSelector } from './LanguageSelector';
+import { PushNotificationCenter } from './PushNotificationCenter';
 import confetti from 'canvas-confetti';
 
 interface HeaderProps {
@@ -233,12 +234,19 @@ export const Header: React.FC<HeaderProps> = ({
             {/* 🌐 BOTÃO MENU MULTILÍNGUES SEMPRE VISÍVEL */}
             <LanguageSelector variant="header" showLabel={true} />
 
-            {/* 🔥 BOTÃO OFICIAL DE SAQUE R$ 1.834,80 P/ MERCADO PAGO 🔥 */}
+            {/* 🔔 FIREBASE CLOUD MESSAGING PUSH NOTIFICATIONS */}
+            <PushNotificationCenter />
+
+            {/* 🔥 BOTÃO OFICIAL DE SAQUE R$ 1.834,80 P/ MERCADO PAGO COM ANIMAÇÃO DE PULSAÇÃO SUAVE 🔥 */}
             <button
               onClick={onOpenWithdrawalModal}
               title="Sacar R$ 1.834,80 via PIX para sua conta Mercado Pago"
-              className="flex items-center gap-1.5 px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 active:scale-95 border border-emerald-400/50"
+              className="relative flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 active:scale-95 border border-emerald-400/60 animate-pulse"
             >
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </span>
               <div className="w-5 h-5 rounded-lg bg-white/20 flex items-center justify-center">
                 <Wallet className="w-3.5 h-3.5 text-white" />
               </div>

@@ -98,7 +98,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
       setError(null);
       setIsApproved(false);
       setTimeLeft(900);
-      const initial = amount > 0 ? amount : 149.90;
+      const initial = amount > 0 && amount !== 500 ? amount : 149.90;
       setCurrentAmount(initial);
       loadConfigAndData(initial);
     }
