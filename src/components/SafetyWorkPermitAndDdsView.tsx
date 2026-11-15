@@ -357,7 +357,7 @@ export const SafetyWorkPermitAndDdsView: React.FC<SafetyWorkPermitAndDdsViewProp
                       </h2>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 print:hidden">
                       <button
                         type="button"
                         onClick={() => window.print()}
@@ -551,7 +551,7 @@ export const SafetyWorkPermitAndDdsView: React.FC<SafetyWorkPermitAndDdsViewProp
                       </h2>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 print:hidden">
                       <button
                         type="button"
                         onClick={() => window.print()}

@@ -19,7 +19,7 @@
 
 @media print {
   body * {
-    visibility: hidden;
+    visibility: hidden !important;
   }
   #printable-technical-doc,
   #printable-technical-doc *,
@@ -29,20 +29,26 @@
   #printable-dds *,
   #printable-rdo,
   #printable-rdo * {
-    visibility: visible;
+    visibility: visible !important;
   }
   #printable-technical-doc,
   #printable-work-permit,
   #printable-dds,
   #printable-rdo {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    padding: 16px;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 24px !important;
     background: #ffffff !important;
     color: #0f172a !important;
     box-shadow: none !important;
     border: none !important;
+    border-radius: 0 !important;
+  }
+  .print\:hidden {
+    display: none !important;
   }
 }
