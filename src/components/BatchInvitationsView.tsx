@@ -26,8 +26,9 @@ import {
   MessageSquare
 } from 'lucide-react';
 import type { CorporateContact, CorporateContactRegion, CorporateContactStatus } from '../types';
-import { loadCorporateContacts, saveCorporateContacts, updateCorporateContactStatus } from '../services/storage';
+import { loadCorporateContacts, saveCorporateContacts, updateCorporateContactStatus, dispatchDemoToSpecificEmails } from '../services/storage';
 import confetti from 'canvas-confetti';
+import { ClientPresentationModal } from './ClientPresentationModal';
 
 interface BatchInvitationsViewProps {
   onNavigateToOpportunities?: () => void;
@@ -47,6 +48,13 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
 
   // Template state
   const templates = [
+    {
+      id: 'template-rdo-cotacoes-demo',
+      title: 'Apresentação RDO Digital & Cotações (Demonstração)',
+      tag: 'Destaque RDO & Cotações',
+      subject: 'Demonstração das Ferramentas de RDO Digital e Cotações - Mãos em Obra',
+      body: 'Olá equipe da {empresa}! Apresentamos a plataforma Mãos em Obra. Gostamos das ferramentas de RDO digital e cotações. Gostaríamos de uma demonstração. Conheça nossa apresentação interativa e agende sua demo em: https://maosemobra.app',
+    },
     {
       id: 'template-parceria',
       title: 'Convite Parceria & Obras Abertas',
@@ -72,6 +80,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
 
   const [activeTemplateId, setActiveTemplateId] = useState<string>(templates[0].id);
   const [customMessage, setCustomMessage] = useState<string>(templates[0].body);
+  const [isPresentationModalOpen, setIsPresentationModalOpen] = useState(false);
 
   // Automated Queue Dispatch State
   const [isQueueRunning, setIsQueueRunning] = useState(false);
@@ -212,6 +221,25 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
 
     const updated = updateCorporateContactStatus(contact.id, 'Enviado', 'Email');
     setContacts(updated);
+  };
+
+  const handleSendRequestedDemoList = () => {
+    const targetEmails = [
+      'sac@fratta.com.br',
+      'contato@luizesempreiteira.com.br',
+      'HT@htconstrucao.com.br',
+      'comercial@construtorasp.com.br',
+      'hoss@hossengenharia.com.br',
+      'hoss@hossengenharia.com.b',
+      'engenharia@escolhaengenharia.com.br',
+      'vendas@easyconstrutora.com.br',
+      'contato@construtoraaraujo.com.br',
+    ];
+    const res = dispatchDemoToSpecificEmails(targetEmails);
+    setContacts(loadCorporateContacts());
+    confetti({ particleCount: 70, spread: 80, origin: { y: 0.6 } });
+    const summaryMsg = res.results.map(r => `• ${r.email}: ${r.status}`).join('\n');
+    alert(`Demonstração processada com sucesso!\n\nEnviados: ${res.sentCount}\nDesconsiderados (já enviados): ${res.skippedCount}\n\nDetalhes:\n${summaryMsg}`);
   };
 
   // Batch Email Copy (BCC / Cco)
@@ -443,10 +471,27 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
               )}
             </button>
 
+            <button
+              onClick={() => setIsPresentationModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer active:scale-95"
+            >
+              <Sparkles className="w-4 h-4 text-slate-950" />
+              <span>Ver Apresentação &amp; Demo</span>
+            </button>
+
+            <button
+              onClick={handleSendRequestedDemoList}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer active:scale-95"
+              title="Enviar demonstração para a lista solicitada (desconsiderando se já enviado recentemente)"
+            >
+              <Send className="w-4 h-4" />
+              <span>Enviar Demo p/ Lista Solicitada</span>
+            </button>
+
             {onNavigateToOpportunities && (
               <button
                 onClick={onNavigateToOpportunities}
-                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer active:scale-95"
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer active:scale-95"
               >
                 <span>Ver Vagas &amp; Obras</span>
                 <ChevronRight className="w-4 h-4" />
@@ -1079,6 +1124,19 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* 🚀 Client Presentation & Demo Modal */}
+      <ClientPresentationModal
+        isOpen={isPresentationModalOpen}
+        onClose={() => setIsPresentationModalOpen(false)}
+        onSendDemoResponse={(contactId) => {
+          const updated = updateCorporateContactStatus(contactId, 'Respondido', 'WhatsApp', {
+            responseInterest: 'Interessado',
+            responseText: 'Gostamos das ferramentas de RDO digital e cotações. Gostaríamos de uma demonstração.',
+          });
+          setContacts(updated);
+        }}
+      />
     </div>
   );
 };

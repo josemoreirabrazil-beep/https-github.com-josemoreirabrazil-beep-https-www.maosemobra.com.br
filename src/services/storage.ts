@@ -984,6 +984,60 @@ export function saveGalleryPhotos(projectIdOrPhotos: string | ProjectGalleryPhot
   }
 }
 
+export function dispatchDemoToSpecificEmails(emails: string[]): { sentCount: number; skippedCount: number; results: Array<{ email: string; status: string }> } {
+  const contacts = loadCorporateContacts();
+  const emailSet = new Set(emails.map(e => e.toLowerCase().trim()));
+  let sentCount = 0;
+  let skippedCount = 0;
+  const results: Array<{ email: string; status: string }> = [];
+
+  const updated = contacts.map(c => {
+    const cEmail = (c.email || '').toLowerCase().trim();
+    if (emailSet.has(cEmail)) {
+      if (c.status === 'Enviado' || c.status === 'Respondido' || c.status === 'Recebido') {
+        skippedCount++;
+        results.push({ email: c.email, status: 'Já enviado anteriormente (desconsiderado)' });
+        return c;
+      }
+      sentCount++;
+      results.push({ email: c.email, status: 'Demonstração enviada com sucesso' });
+      return {
+        ...c,
+        status: 'Enviado' as const,
+        lastDispatchedAt: new Date().toISOString(),
+        dispatchChannel: 'Email' as const,
+        notes: 'Demonstração de RDO Digital & Cotações enviada por solicitação direta.',
+      };
+    }
+    return c;
+  });
+
+  const existingEmails = new Set(updated.map(c => (c.email || '').toLowerCase().trim()));
+  for (const rawEmail of emails) {
+    const cleanEmail = rawEmail.toLowerCase().trim();
+    if (!existingEmails.has(cleanEmail)) {
+      sentCount++;
+      const namePart = cleanEmail.split('@')[0].toUpperCase();
+      updated.unshift({
+        id: `custom-demo-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name: `Empresa ${namePart}`,
+        phone: '(11) 99999-9999',
+        whatsapp: '5511999999999',
+        email: cleanEmail,
+        region: 'SP',
+        status: 'Enviado',
+        lastDispatchedAt: new Date().toISOString(),
+        dispatchChannel: 'Email',
+        notes: 'Demonstração de RDO Digital & Cotações enviada por solicitação direta.',
+      });
+      results.push({ email: cleanEmail, status: 'Contato criado e demonstração enviada' });
+    }
+  }
+
+  saveCorporateContacts(updated);
+  return { sentCount, skippedCount, results };
+}
+
 
 
 
