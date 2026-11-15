@@ -172,6 +172,21 @@ export async function transmitNfseToApi(
   return data;
 }
 
+export interface FiscalCredentialChecks {
+  cnpjValid: boolean;
+  cnpjFormatted: string;
+  companyName: string;
+  certificateLoaded: boolean;
+  mtlsActive: boolean;
+  tokenRequired: boolean;
+  tokenConfigured: boolean;
+  provider: FiscalApiIntegrationConfig['provider'];
+  providerLabel: string;
+  endpoint: string;
+  environment: 'homologacao' | 'producao';
+  httpStatus?: number;
+}
+
 export async function testFiscalApiConnection(
   explicitToken?: string
 ): Promise<{
@@ -179,6 +194,7 @@ export async function testFiscalApiConnection(
   connected: boolean;
   httpStatus?: number;
   message: string;
+  credentialChecks?: FiscalCredentialChecks;
   config: FiscalConfiguration;
   log?: FiscalTransmissionLog;
 }> {
@@ -189,7 +205,7 @@ export async function testFiscalApiConnection(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || 'Falha ao testar conexão com a API fiscal.');
+    throw new Error(data.error || data.message || 'Falha ao testar conexão com a API fiscal.');
   }
   return data;
 }

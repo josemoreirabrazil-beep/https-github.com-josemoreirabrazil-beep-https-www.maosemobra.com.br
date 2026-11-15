@@ -94,7 +94,7 @@ import { RecebimentosWebhookManager } from './RecebimentosWebhookManager';
 import { InvitationMetricsManager } from './InvitationMetricsManager';
 import { SubscriberBillingDispatcher } from './SubscriberBillingDispatcher';
 import { FiscalNfseManager } from './FiscalNfseManager';
-import { FiscalEmitterConfigModule } from './FiscalEmitterConfigModule';
+import { FiscalAutomationModule } from './FiscalAutomationModule';
 import confetti from 'canvas-confetti';
 
 interface AdminMasterViewProps {
@@ -878,7 +878,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           </span>
         </button>
 
-        {/* TAB 3: CONFIGURADOR DO EMISSOR, CERTIFICADO A1 & ENDPOINTS WEB */}
+        {/* TAB 3: FISCAL AUTOMATION MODULE — CERTIFICADO A1, CNPJ & ENDPOINTS API */}
         <button
           onClick={() => setActiveSubTab('fiscal_config')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
@@ -888,7 +888,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           }`}
         >
           <Plug className="w-4 h-4" />
-          <span>Emissor NFS-e & Certificado A1 (Config & Teste)</span>
+          <span>Automação Fiscal (CNPJ, A1 & Endpoints API)</span>
         </button>
 
         <button
@@ -2312,11 +2312,11 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* ⚙️ TAB 9: MÓDULO DE CONFIGURAÇÃO DO EMISSOR, CERTIFICADO A1 & ENDPOINTS WEB */}
+      {/* ⚙️ TAB 9: FISCAL AUTOMATION MODULE (CERTIFICADO A1, CNPJ & ENDPOINTS API) */}
       {/* ======================================================== */}
       {activeSubTab === 'fiscal_config' && (
         <div className="space-y-6">
-          <FiscalEmitterConfigModule
+          <FiscalAutomationModule
             adminToken={adminUser.token}
             onDataChanged={() => loadAllAdminData(false)}
             onOpenInvoicesTab={() => setActiveSubTab('fiscal')}

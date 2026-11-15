@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
-import { Navigation, type NavTab } from './components/Navigation';
+import { Navigation, type NavTab, type UserAccessRole } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
 import { DailyLogView } from './components/DailyLogView';
 import { FinancialView } from './components/FinancialView';
@@ -19,7 +19,7 @@ import { ProjectModal } from './components/ProjectModal';
 import { InstallAppModal } from './components/InstallAppModal';
 import { WithdrawalModal } from './components/WithdrawalModal';
 import { MercadoPagoModal } from './components/MercadoPagoModal';
-import { Download, CheckCircle2, X, Megaphone, ExternalLink, Lock, Briefcase, Sparkles } from 'lucide-react';
+import { Download, CheckCircle2, X, Megaphone, ExternalLink, Lock, Briefcase, Sparkles, ShieldCheck, LogIn } from 'lucide-react';
 import { 
   parseMercadoPagoRedirectParams, 
   processMercadoPagoRedirectReturn, 
@@ -52,8 +52,11 @@ import {
   hasPaidServiceAccess,
   hasProLaudoAccess,
   syncEnrolledSubscriberToServer,
+  verifyAuthenticatedSubscriberAccess,
+  fetchActiveSubscriberNotices,
   SUBSCRIPTION_UPDATED_EVENT,
-  type ActiveSubscriptionState
+  type ActiveSubscriptionState,
+  type SubscriberBillingNotice
 } from './services/subscriberBilling';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser, ProjectGoal, TechnicalDocument } from './types';
@@ -106,7 +109,8 @@ export default function App() {
 
   // Auth / Google Drive State
   const [user, setUser] = useState<any>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false); // Google Drive OAuth token state
+  const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
 
   // Admin Master Global State
   const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
@@ -117,7 +121,33 @@ export default function App() {
   const [isProUpgradeModalOpen, setIsProUpgradeModalOpen] = useState(false);
   const [upgradeModalMode, setUpgradeModalMode] = useState<'pro-laudo' | 'choose-plan'>('choose-plan');
 
-  const canAccessServices = hasPaidServiceAccess(activeSubscription) || Boolean(adminUser);
+  // Official Subscriber Checkout Recovery & 6-Month Reduced Plan Notice
+  const [subscriberNotices, setSubscriberNotices] = useState<SubscriberBillingNotice[]>([]);
+  const [dismissedNoticeId, setDismissedNoticeId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('maos_em_obra_dismissed_notice_id');
+    } catch {
+      return null;
+    }
+  });
+
+  const isFirebaseSignedIn = Boolean(user);
+  const isAdminAuthenticated = Boolean(adminUser);
+  const isUserAuthenticated = isFirebaseSignedIn || isAdminAuthenticated;
+  const isPaidSubscriber = hasPaidServiceAccess(activeSubscription);
+  const isProSubscriber = hasProLaudoAccess(activeSubscription);
+  const canAccessServices = isPaidSubscriber || isAdminAuthenticated;
+  const canEmitProLaudos = isProSubscriber || isAdminAuthenticated;
+  const userAccessRole: UserAccessRole = isAdminAuthenticated
+    ? 'admin'
+    : isProSubscriber
+    ? 'subscriber_pro'
+    : isPaidSubscriber
+    ? 'subscriber_paid'
+    : isFirebaseSignedIn
+    ? 'free'
+    : 'visitor';
+
   const serviceTabSet = new Set<NavTab>(['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team', 'invitations']);
   const isLockedServiceTab = serviceTabSet.has(activeTab) && !canAccessServices;
 
@@ -141,14 +171,54 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    fetchActiveSubscriberNotices()
+      .then((res) => {
+        setSubscriberNotices((res.notices || []).filter((n) => n.active));
+      })
+      .catch(() => {});
+  }, [activeTab]);
+
   // Listen to Firebase Auth
   useEffect(() => {
     const unsubscribe = subscribeToAuthChanges((currentUser) => {
       setUser(currentUser);
       setIsAuthenticated(!!currentUser && !!getCachedGoogleToken());
+      setIsAuthResolved(true);
     });
     return () => unsubscribe();
   }, []);
+
+  // Verify authenticated user (Firebase email / Admin token) against enrolled active subscribers on backend
+  useEffect(() => {
+    if (!isAuthResolved && !adminUser) return;
+    if (!user?.email && !adminUser?.token) return;
+
+    let cancelled = false;
+    verifyAuthenticatedSubscriberAccess(user?.email, adminUser?.token)
+      .then((verified) => {
+        if (cancelled) return;
+        if (verified.hasServiceAccess && !verified.isAdmin) {
+          const currentLocal = getActiveUserSubscription();
+          const alreadyHasPro = hasProLaudoAccess(currentLocal);
+          if (!hasPaidServiceAccess(currentLocal) || (verified.hasProLaudoAccess && !alreadyHasPro)) {
+            const synced = setActiveUserSubscription({
+              planId: verified.planId,
+              planCode: verified.planCode,
+              planName: verified.planName,
+              price: verified.price,
+              billingCycle: verified.billingCycle,
+            });
+            setActiveSubscription(synced);
+          }
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthResolved, user?.email, adminUser?.token]);
 
   // 🚀 Firebase Cloud Messaging Push Notifications Hook
   const { requestPermission, latestNotification } = usePushNotifications();
@@ -502,7 +572,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f8f9fa] dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen overflow-x-clip bg-[#f8f9fa] dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
       
       {/* Top Header */}
       <Header
@@ -512,14 +582,18 @@ export default function App() {
         onOpenNewProjectModal={() => setIsNewProjectModalOpen(true)}
         onOpenEditProjectModal={() => setIsEditProjectModalOpen(true)}
         isAuthenticated={isAuthenticated}
-        userEmail={user?.email}
+        isUserAuthenticated={isUserAuthenticated}
+        hasServiceAccess={canAccessServices}
+        hasProAccess={canEmitProLaudos}
+        userEmail={adminUser?.email || user?.email}
         userPhoto={user?.photoURL}
         rdos={rdos}
         expenses={expenses}
         phases={phases}
-        isAdminAuthenticated={!!adminUser}
+        isAdminAuthenticated={isAdminAuthenticated}
         onOpenAdminModal={() => setIsAdminLoginModalOpen(true)}
         onNavigateToAdmin={() => setActiveTab('admin')}
+        onNavigateToReports={() => handleTabChange('reports')}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
       />
@@ -532,8 +606,16 @@ export default function App() {
         unpaidExpensesCount={expenses.filter(e => e.status !== 'Pago').length}
         requestsCount={serviceRequests.filter(r => r.status === 'Pendente de Orçamento').length}
         techDocsCount={techDocs.length}
-        isAdminAuthenticated={!!adminUser}
+        isAdminAuthenticated={isAdminAuthenticated}
+        isUserAuthenticated={isUserAuthenticated}
         hasServiceAccess={canAccessServices}
+        hasProAccess={canEmitProLaudos}
+        userAccessRole={userAccessRole}
+        activePlanName={isAdminAuthenticated ? 'Admin Master Global' : activeSubscription.planName}
+        userEmail={adminUser?.email || user?.email || null}
+        onOpenAdminModal={() => setIsAdminLoginModalOpen(true)}
+        onOpenChoosePlanModal={openChoosePlanModal}
+        onRequireAuth={handleRequireAuth}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
       />
@@ -617,6 +699,72 @@ export default function App() {
         </div>
       </div>
 
+      {/* 📣 COMUNICADO AOS ASSINANTES: ERRO CHECKOUT MERCADO PAGO & PLANOS REDUZIDOS POR 6 MESES */}
+      {(() => {
+        const currentNotice = subscriberNotices[0];
+        if (!currentNotice || dismissedNoticeId === currentNotice.id) return null;
+        return (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 w-full">
+            <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-500/70 text-slate-900 dark:text-amber-100 shadow-lg flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500 text-slate-950 shrink-0 mt-0.5">
+                  <Megaphone className="w-5 h-5" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                      {currentNotice.title}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white">
+                      Planos Reduzidos por {currentNotice.promoDurationMonths} Meses
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-700 dark:text-amber-100/90 leading-relaxed font-medium">
+                    {currentNotice.message}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 pt-1 text-[11px] font-bold">
+                    {currentNotice.reducedPlansSummary.map((plan) => (
+                      <span
+                        key={plan.name}
+                        className="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-500/40 text-slate-800 dark:text-slate-200"
+                      >
+                        {plan.name}:{' '}
+                        <strong className="text-emerald-600 dark:text-emerald-400">
+                          R$ {plan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/{plan.cycle}
+                        </strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full lg:w-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={openChoosePlanModal}
+                  className="flex-1 lg:flex-initial px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md transition cursor-pointer whitespace-nowrap"
+                >
+                  Regularizar / Ver Planos Reduzidos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDismissedNoticeId(currentNotice.id);
+                    try {
+                      localStorage.setItem('maos_em_obra_dismissed_notice_id', currentNotice.id);
+                    } catch {}
+                  }}
+                  className="p-2 rounded-xl hover:bg-amber-500/20 text-amber-800 dark:text-amber-300 transition cursor-pointer"
+                  title="Dispensar comunicado"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
         {activeTab === 'dashboard' && (
@@ -658,26 +806,43 @@ export default function App() {
               </div>
               <div className="space-y-1.5">
                 <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-black uppercase tracking-wider">
-                  Cadastro Gratuito Ativo (R$ 0,00)
+                  {isUserAuthenticated
+                    ? `Conta Autenticada (${user?.email || 'Local'}) · Cadastro Gratuito (R$ 0,00)`
+                    : 'Visitante Não Autenticado · Acesso Restrito'}
                 </span>
                 <h2 className="text-xl font-black text-slate-900 dark:text-white">
-                  Acesso aos Serviços Disponível Apenas nos Planos Pagos
+                  {activeTab === 'reports'
+                    ? 'Acesso a ART & Laudos Técnicos — Assinante Pago ou Admin Master'
+                    : 'Acesso aos Serviços Disponível Apenas para Assinantes Pagos ou Admin'}
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                  Os cadastros gratuitos dão acesso <strong>apenas à visualização das oportunidades de obras</strong>. Para acessar serviços operacionais — como <strong>ART &amp; Laudos, Solicitações &amp; Logística, RDO, Orçamento &amp; Custos, Cronograma, Calculadora IA, Google Drive e Equipe</strong> — escolha um plano mensal (a partir de R$ 25,00/mês) ou o plano anual para Construtoras, Empreiteiras e Incorporadoras (R$ 499,00/ano).
+                  Os cadastros gratuitos dão acesso <strong>apenas à visualização das oportunidades de obras</strong>. Se você já é assinante pago, entre com sua conta Google; se for administrador, faça login no <strong>Admin Master</strong>; ou escolha um plano mensal (a partir de R$ 25,00/mês — <strong>Laudos Técnicos no Plano Pro R$ 29,90/mês</strong>) ou o plano anual (R$ 499,00/ano).
                 </p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => handleTabChange('opportunities')}
-                className="w-full py-3 px-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer"
-              >
-                <Briefcase className="w-4 h-4 text-emerald-500" />
-                <span>Visualizar Oportunidades (Gratuito)</span>
-              </button>
+              {!isFirebaseSignedIn && (
+                <button
+                  type="button"
+                  onClick={handleRequireAuth}
+                  className="w-full py-3 px-4 rounded-2xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4 text-amber-400" />
+                  <span>Entrar com Google (Assinante)</span>
+                </button>
+              )}
+
+              {!isAdminAuthenticated && (
+                <button
+                  type="button"
+                  onClick={() => setIsAdminLoginModalOpen(true)}
+                  className="w-full py-3 px-4 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-900 dark:text-amber-200 text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4 text-amber-500" />
+                  <span>Acesso Admin Master</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -686,6 +851,15 @@ export default function App() {
               >
                 <Sparkles className="w-4 h-4" />
                 <span>Escolher Plano Pago (Mensal ou Anual)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTabChange('opportunities')}
+                className="w-full py-3 px-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <Briefcase className="w-4 h-4 text-emerald-500" />
+                <span>Visualizar Oportunidades (Gratuito)</span>
               </button>
             </div>
           </div>
@@ -742,8 +916,8 @@ export default function App() {
             onSaveDocument={handleSaveTechDoc}
             onDeleteDocument={handleDeleteTechDoc}
             onUpdateProject={handleSaveProject}
-            hasProAccess={hasProLaudoAccess(activeSubscription)}
-            activePlanName={activeSubscription.planName}
+            hasProAccess={canEmitProLaudos}
+            activePlanName={isAdminAuthenticated ? 'Admin Master Global' : activeSubscription.planName}
             onOpenProUpgrade={openProLaudoModal}
           />
         )}

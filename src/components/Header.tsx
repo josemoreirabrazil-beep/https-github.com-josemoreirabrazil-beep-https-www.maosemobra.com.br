@@ -17,7 +17,8 @@ import {
   ShieldCheck,
   Download,
   Wallet,
-  ArrowUpRight
+  ArrowUpRight,
+  FileCheck2
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';
@@ -40,8 +41,12 @@ interface HeaderProps {
   phases: Phase[];
   onSyncSuccess?: () => void;
   isAdminAuthenticated?: boolean;
+  isUserAuthenticated?: boolean;
+  hasServiceAccess?: boolean;
+  hasProAccess?: boolean;
   onOpenAdminModal?: () => void;
   onNavigateToAdmin?: () => void;
+  onNavigateToReports?: () => void;
   onOpenInstallModal?: () => void;
   onOpenWithdrawalModal?: () => void;
 }
@@ -60,8 +65,12 @@ export const Header: React.FC<HeaderProps> = ({
   phases,
   onSyncSuccess,
   isAdminAuthenticated = false,
+  isUserAuthenticated = false,
+  hasServiceAccess = false,
+  hasProAccess = false,
   onOpenAdminModal,
   onNavigateToAdmin,
+  onNavigateToReports,
   onOpenInstallModal,
   onOpenWithdrawalModal,
 }) => {
@@ -122,32 +131,32 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20 gap-4">
+    <header className="relative xl:sticky xl:top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 transition-colors">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex flex-wrap xl:flex-nowrap items-center justify-between min-h-20 py-2.5 xl:py-0 xl:h-20 gap-2.5 sm:gap-3">
           
           {/* Logo & Brand */}
-          <div className="flex items-center gap-3.5 shrink-0">
-            <div className="w-11 h-11 rounded-2xl bg-amber-500 flex items-center justify-center text-slate-950 shadow-xs font-black">
-              <HardHat className="w-6 h-6 text-slate-950" />
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-amber-500 flex items-center justify-center text-slate-950 shadow-xs font-black">
+              <HardHat className="w-5 h-5 sm:w-6 sm:h-6 text-slate-950" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+                <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
                   Mãos em Obra
                 </h1>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 rounded-full">
+                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 rounded-full whitespace-nowrap">
                   Canteiro Pro
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-normal hidden md:block">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal hidden 2xl:block">
                 Painel de Gerenciamento de Canteiro & Custos
               </p>
             </div>
           </div>
 
           {/* Project Switcher */}
-          <div className="relative flex-1 max-w-xs sm:max-w-sm">
+          <div className="relative flex-1 min-w-[170px] max-w-xs xl:max-w-[230px]">
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="w-full flex items-center justify-between gap-2.5 px-4 py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-left transition shadow-xs"
@@ -239,7 +248,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Action Tools, Multilingual Menu & Google Drive Sync */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex flex-wrap xl:flex-nowrap items-center justify-end gap-1.5 sm:gap-2 w-full xl:w-auto">
 
             {/* 🌐 BOTÃO MENU MULTILÍNGUES SEMPRE VISÍVEL */}
             <LanguageSelector variant="header" showLabel={true} />
@@ -247,30 +256,67 @@ export const Header: React.FC<HeaderProps> = ({
             {/* 🔔 FIREBASE CLOUD MESSAGING PUSH NOTIFICATIONS */}
             <PushNotificationCenter />
 
+            {/* 📄 ATALHO DIRETO ART & LAUDOS NO CABEÇALHO */}
+            {onNavigateToReports && (
+              <button
+                type="button"
+                data-testid="header-art-laudos-btn"
+                onClick={onNavigateToReports}
+                title={
+                  isAdminAuthenticated
+                    ? 'ART & Laudos (Admin Master — Acesso Total)'
+                    : hasProAccess
+                    ? 'ART & Laudos (Plano Pro Ativo)'
+                    : hasServiceAccess
+                    ? 'ART & Laudos (Assinante Ativo)'
+                    : isUserAuthenticated
+                    ? 'ART & Laudos (Requer Plano Pago)'
+                    : 'ART & Laudos (Entre ou Assine para Liberar)'
+                }
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl border shadow-xs transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95 ${
+                  hasServiceAccess
+                    ? 'bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-amber-400 border-amber-500/50'
+                    : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <FileCheck2 className={`w-3.5 h-3.5 shrink-0 ${hasServiceAccess ? 'text-amber-400' : 'text-amber-500'}`} />
+                <span>ART &amp; Laudos</span>
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+                  isAdminAuthenticated || hasProAccess
+                    ? 'bg-emerald-500/20 text-emerald-300'
+                    : hasServiceAccess
+                    ? 'bg-amber-500/20 text-amber-300'
+                    : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                }`}>
+                  {isAdminAuthenticated ? 'Admin' : hasProAccess ? 'Pro' : hasServiceAccess ? 'Ativo' : 'Plano'}
+                </span>
+              </button>
+            )}
+
             {/* 🔥 BOTÃO OFICIAL DE SAQUE R$ 1.834,80 P/ MERCADO PAGO COM ANIMAÇÃO DE PULSAÇÃO SUAVE 🔥 */}
             <button
               onClick={onOpenWithdrawalModal}
               title="Sacar R$ 1.834,80 via PIX para sua conta Mercado Pago"
-              className="relative flex items-center gap-1.5 px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 active:scale-95 border border-emerald-400/60 animate-pulse"
+              className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95 border border-emerald-400/60 animate-pulse"
             >
               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
               </span>
-              <div className="w-5 h-5 rounded-lg bg-white/20 flex items-center justify-center">
-                <Wallet className="w-3.5 h-3.5 text-white" />
+              <div className="w-4 h-4 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                <Wallet className="w-3 h-3 text-white" />
               </div>
-              <span className="font-black hidden lg:inline">Sacar R$ 1.834,80 p/ Mercado Pago</span>
-              <span className="font-black lg:hidden">Sacar R$ 1.834,80</span>
+              <span className="font-black hidden 2xl:inline">Sacar R$ 1.834,80 p/ MP</span>
+              <span className="font-black 2xl:hidden">Sacar R$ 1.834,80</span>
             </button>
 
             {/* Baixar App / Instalar PWA Button */}
             <button
               onClick={onOpenInstallModal}
               title="Baixar e Instalar o App no Celular ou Computador"
-              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 text-xs font-black rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition cursor-pointer shrink-0 active:scale-95"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
             >
-              <Download className="w-4 h-4 text-slate-950" />
+              <Download className="w-3.5 h-3.5 text-slate-950 shrink-0" />
               <span className="font-extrabold">Baixar App</span>
             </button>
             
@@ -284,13 +330,13 @@ export const Header: React.FC<HeaderProps> = ({
                 }
               }}
               title={isAdminAuthenticated ? "Painel Admin Master Global (Blindagem Ativa)" : "Acesso Admin Master Global"}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-2xl border transition shadow-xs cursor-pointer ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-bold rounded-2xl border transition shadow-xs cursor-pointer shrink-0 whitespace-nowrap ${
                 isAdminAuthenticated
                   ? 'bg-emerald-500/10 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/20'
                   : 'bg-amber-500/10 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
               }`}
             >
-              <ShieldCheck className={`w-4 h-4 ${isAdminAuthenticated ? 'text-emerald-500' : 'text-amber-500'}`} />
+              <ShieldCheck className={`w-4 h-4 shrink-0 ${isAdminAuthenticated ? 'text-emerald-500' : 'text-amber-500'}`} />
               <span className="hidden sm:inline">Admin Master</span>
               {isAdminAuthenticated && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse hidden sm:inline-block" />
@@ -302,34 +348,34 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={handleBackupToDrive}
               disabled={isSyncing}
               title="Salvar backup e relatórios no Google Drive"
-              className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold rounded-2xl border transition shadow-xs cursor-pointer ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-semibold rounded-2xl border transition shadow-xs cursor-pointer shrink-0 whitespace-nowrap ${
                 isAuthenticated 
                   ? 'bg-slate-900 dark:bg-slate-800 text-white border-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700'
                   : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-amber-400'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span className="hidden md:inline font-bold">
+              <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden 2xl:inline font-bold">
                 {isSyncing ? 'Sincronizando...' : 'Backup no Drive'}
               </span>
             </button>
 
             {/* Google Drive Auth Button / Avatar */}
             {isAuthenticated ? (
-              <div className="relative">
+              <div className="relative shrink-0">
                 <button
                   onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                  className="flex items-center gap-2.5 p-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-amber-400 transition shadow-xs"
+                  className="flex items-center gap-2 p-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full hover:border-amber-400 transition shadow-xs"
                   title="Google Drive Conectado"
                 >
-                  <div className="w-9 h-9 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                  <div className="w-8 h-8 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
                     {userPhoto ? (
                       <img src={userPhoto} alt="Avatar" className="w-full h-full rounded-full object-cover" />
                     ) : (
                       userEmail?.substring(0, 2).toUpperCase() || 'CS'
                     )}
                   </div>
-                  <span className="hidden lg:inline text-xs font-medium text-slate-700 dark:text-slate-300 pr-2 max-w-[120px] truncate">
+                  <span className="hidden 2xl:inline text-xs font-medium text-slate-700 dark:text-slate-300 pr-2 max-w-[110px] truncate">
                     {userEmail?.split('@')[0]}
                   </span>
                 </button>
@@ -361,12 +407,12 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <button
                 onClick={handleGoogleLogin}
-                className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-2xl transition shadow-xs"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-2xl transition shadow-xs shrink-0 whitespace-nowrap"
               >
-                <div className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center text-[10px] font-bold">
+                <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center text-[10px] font-bold shrink-0">
                   G
                 </div>
-                <span className="hidden sm:inline">Conectar Google</span>
+                <span className="hidden sm:inline">Google</span>
               </button>
             )}
           </div>

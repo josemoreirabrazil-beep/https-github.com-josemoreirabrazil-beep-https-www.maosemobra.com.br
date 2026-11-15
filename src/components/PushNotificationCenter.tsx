@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, BellRing, Check, X, ShieldCheck, Zap } from 'lucide-react';
 import { requestPushNotificationPermission, simulatePushNotification, onForegroundMessage } from '../services/firebaseMessaging';
+import { fetchActiveSubscriberNotices } from '../services/subscriberBilling';
 import confetti from 'canvas-confetti';
 
 interface PushNotificationCenterProps {
@@ -14,6 +15,12 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({ 
   );
   const [isOpen, setIsOpen] = useState(false);
   const [notificationsHistory, setNotificationsHistory] = useState<Array<{ id: string; title: string; body: string; time: string }>>([
+    {
+      id: 'notif-notice-mp-6m',
+      title: 'Comunicado: Erro Checkout Mercado Pago & Planos Reduzidos (6 Meses)',
+      body: 'Cobranças reenviadas devido a erro anterior de compensação no checkout MP (já corrigido). Todos os planos com valor reduzido por 6 meses (a partir de R$ 25,00/mês).',
+      time: 'Comunicado Oficial'
+    },
     {
       id: 'notif-1',
       title: 'Mercado Pago & PIX: Saldo Disponível',
@@ -31,6 +38,26 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({ 
   useEffect(() => {
     const saved = localStorage.getItem('maos_em_obra_fcm_token');
     if (saved) setFcmToken(saved);
+
+    fetchActiveSubscriberNotices()
+      .then((res) => {
+        if (res.notices && res.notices.length > 0) {
+          const latest = res.notices[0];
+          setNotificationsHistory((prev) => {
+            const filtered = prev.filter((item) => item.id !== 'notif-notice-mp-6m' && item.id !== latest.id);
+            return [
+              {
+                id: latest.id,
+                title: latest.title,
+                body: latest.message,
+                time: 'Comunicado Oficial',
+              },
+              ...filtered,
+            ];
+          });
+        }
+      })
+      .catch(() => {});
 
     const unsubscribe = onForegroundMessage((payload) => {
       setNotificationsHistory(prev => [

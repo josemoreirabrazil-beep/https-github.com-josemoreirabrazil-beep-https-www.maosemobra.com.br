@@ -15,13 +15,17 @@ import {
   Menu,
   X,
   ChevronDown,
-  Lock
+  Lock,
+  UserCheck,
+  Sparkles,
+  LogIn
 } from 'lucide-react';
 import { LanguageSelector } from './LanguageSelector';
 
 export type NavTab = 'dashboard' | 'opportunities' | 'invitations' | 'requests' | 'rdo' | 'reports' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'admin';
+export type UserAccessRole = 'admin' | 'subscriber_pro' | 'subscriber_paid' | 'free' | 'visitor';
 
-const SERVICE_TABS: NavTab[] = ['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team'];
+const SERVICE_TABS: NavTab[] = ['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team', 'invitations'];
 
 interface NavigationProps {
   activeTab: NavTab;
@@ -31,7 +35,15 @@ interface NavigationProps {
   requestsCount?: number;
   techDocsCount?: number;
   isAdminAuthenticated?: boolean;
+  isUserAuthenticated?: boolean;
   hasServiceAccess?: boolean;
+  hasProAccess?: boolean;
+  userAccessRole?: UserAccessRole;
+  activePlanName?: string;
+  userEmail?: string | null;
+  onOpenAdminModal?: () => void;
+  onOpenChoosePlanModal?: () => void;
+  onRequireAuth?: () => void;
   onOpenInstallModal?: () => void;
   onOpenWithdrawalModal?: () => void;
 }
@@ -44,7 +56,15 @@ export const Navigation: React.FC<NavigationProps> = ({
   requestsCount = 0,
   techDocsCount = 0,
   isAdminAuthenticated = false,
+  isUserAuthenticated = false,
   hasServiceAccess = true,
+  hasProAccess = false,
+  userAccessRole = 'visitor',
+  activePlanName = 'Cadastro Gratuito',
+  userEmail = null,
+  onOpenAdminModal,
+  onOpenChoosePlanModal,
+  onRequireAuth,
   onOpenInstallModal,
   onOpenWithdrawalModal,
 }) => {
@@ -156,104 +176,290 @@ export const Navigation: React.FC<NavigationProps> = ({
   };
 
   return (
-    <nav className="bg-[#f8f9fa] dark:bg-slate-950 sticky top-20 z-30 py-2 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-2">
-          {/* Pinned Menu Button */}
-          <div className="relative shrink-0" ref={menuRef}>
+    <nav className="sticky top-0 xl:top-[81px] z-30 py-2 bg-[#f8f9fa]/95 dark:bg-slate-950/95 backdrop-blur-sm border-b border-slate-200/70 dark:border-slate-800/70 transition-colors">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Pinned Primary Group: Menu + ART & Laudos (Never hidden or collapsed on any screen) */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Pinned Menu Button */}
+            <div className="relative shrink-0" ref={menuRef}>
+              <button
+                type="button"
+                data-testid="nav-menu-btn"
+                onClick={() => setIsMenuOpen(prev => !prev)}
+                aria-expanded={isMenuOpen}
+                aria-label="Abrir menu de navegação"
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs font-black border transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 ${
+                  isMenuOpen
+                    ? 'bg-amber-500 text-slate-950 border-amber-500'
+                    : 'bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white border-slate-800 dark:border-slate-700'
+                }`}
+              >
+                {isMenuOpen ? <X className="w-4 h-4 shrink-0" /> : <Menu className="w-4 h-4 text-amber-400 shrink-0" />}
+                <span>Menu</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform shrink-0 ${isMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isMenuOpen && (
+                <div className="fixed left-3 right-3 mt-2 sm:absolute sm:left-0 sm:right-auto sm:w-96 bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Menu Principal do Sistema
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-400">
+                      {tabs.length} módulos
+                    </span>
+                  </div>
+
+                  {/* Verified Auth & Role Status Strip */}
+                  <div className={`mx-1 my-2 p-2.5 rounded-2xl border text-[11px] space-y-2 ${
+                    isAdminAuthenticated
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-800 dark:text-emerald-200'
+                      : hasServiceAccess
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+                      : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                  }`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-black min-w-0">
+                        <UserCheck className={`w-3.5 h-3.5 shrink-0 ${
+                          isAdminAuthenticated || hasServiceAccess ? 'text-emerald-500' : 'text-amber-500'
+                        }`} />
+                        <span className="truncate">
+                          {isAdminAuthenticated
+                            ? 'Admin Master Global (Autenticado)'
+                            : userAccessRole === 'subscriber_pro'
+                            ? `Assinante Pro (${activePlanName})`
+                            : userAccessRole === 'subscriber_paid'
+                            ? `Assinante Ativo (${activePlanName})`
+                            : isUserAuthenticated
+                            ? 'Autenticado · Cadastro Gratuito'
+                            : 'Visitante · Não Autenticado'}
+                        </span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                        isAdminAuthenticated || hasProAccess
+                          ? 'bg-emerald-500 text-white'
+                          : hasServiceAccess
+                          ? 'bg-amber-500 text-slate-950'
+                          : 'bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                      }`}>
+                        {isAdminAuthenticated
+                          ? 'ADMIN'
+                          : hasProAccess
+                          ? 'PRO'
+                          : hasServiceAccess
+                          ? 'ATIVO'
+                          : 'GRÁTIS'}
+                      </span>
+                    </div>
+
+                    {userEmail && (
+                      <div className="text-[10px] opacity-80 truncate font-medium">
+                        Conta: {userEmail}
+                      </div>
+                    )}
+
+                    {!hasServiceAccess && (
+                      <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                        {!isUserAuthenticated && onRequireAuth && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsMenuOpen(false);
+                              onRequireAuth();
+                            }}
+                            className="px-2.5 py-1 rounded-xl bg-slate-900 dark:bg-slate-700 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer"
+                          >
+                            <LogIn className="w-3 h-3" />
+                            <span>Entrar (Google)</span>
+                          </button>
+                        )}
+                        {!isAdminAuthenticated && onOpenAdminModal && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsMenuOpen(false);
+                              onOpenAdminModal();
+                            }}
+                            className="px-2.5 py-1 rounded-xl bg-amber-500 text-slate-950 font-black text-[10px] flex items-center gap-1 cursor-pointer"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Admin Master</span>
+                          </button>
+                        )}
+                        {onOpenChoosePlanModal && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsMenuOpen(false);
+                              onOpenChoosePlanModal();
+                            }}
+                            className="px-2.5 py-1 rounded-xl bg-[#009ee3] text-white font-black text-[10px] flex items-center gap-1 cursor-pointer"
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            <span>Assinar Plano</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="max-h-[60vh] overflow-y-auto py-1 space-y-1">
+                    {tabs.map((tab) => {
+                      const Icon = tab.icon;
+                      const isActive = activeTab === tab.id;
+                      const isReports = tab.id === 'reports';
+                      const isLockedService = !hasServiceAccess && SERVICE_TABS.includes(tab.id);
+
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => handleSelectFromMenu(tab.id)}
+                          className={`w-full text-left px-3 py-2.5 rounded-2xl transition flex items-center justify-between gap-3 cursor-pointer ${
+                            isActive
+                              ? 'bg-amber-500 text-slate-950'
+                              : isReports
+                              ? 'bg-amber-500/10 hover:bg-amber-500/20 text-slate-900 dark:text-white border border-amber-500/30'
+                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                              isActive
+                                ? 'bg-slate-950/15 text-slate-950'
+                                : isReports
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                            }`}>
+                              <Icon className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-black truncate flex items-center gap-1.5">
+                                <span>{isReports ? 'Emissão de ART & Laudos' : tab.label}</span>
+                                {isLockedService && <Lock className="w-3 h-3 text-amber-500 shrink-0" />}
+                              </div>
+                              <div className={`text-[11px] truncate ${
+                                isActive ? 'text-slate-900/80' : 'text-slate-500 dark:text-slate-400'
+                              }`}>
+                                {isLockedService
+                                  ? (!isUserAuthenticated ? 'Requer login/assinatura (ou acesso Admin)' : 'Requer plano pago (Cadastro Gratuito só vê oportunidades)')
+                                  : tab.description}
+                              </div>
+                            </div>
+                          </div>
+
+                          {isLockedService ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                              {!isUserAuthenticated ? 'Login / Plano' : 'Plano Pago'}
+                            </span>
+                          ) : tab.badge ? (
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
+                              isActive
+                                ? 'bg-slate-950/15 text-slate-950'
+                                : tab.badgeColor || 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                            }`}>
+                              {tab.badge}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Pinned Direct ART & Laudos Button (Always Visible Alongside Menu, State Tied to Auth & Admin/Subscriber) */}
             <button
               type="button"
-              onClick={() => setIsMenuOpen(prev => !prev)}
-              aria-expanded={isMenuOpen}
-              aria-label="Abrir menu de navegação"
-              className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl text-xs font-black border transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 ${
-                isMenuOpen
-                  ? 'bg-amber-500 text-slate-950 border-amber-500'
-                  : 'bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white border-slate-800 dark:border-slate-700'
+              data-testid="nav-art-laudos-btn"
+              onClick={() => onTabChange('reports')}
+              title={
+                isAdminAuthenticated
+                  ? 'Emissão de ART & Laudos (Admin Master — Acesso Total Liberado)'
+                  : hasProAccess
+                  ? 'Emissão de ART & Laudos (Plano Pro Ativo — Acesso Total Liberado)'
+                  : hasServiceAccess
+                  ? 'Emissão de ART (CREA/RRT) liberada — Laudos no Plano Pro'
+                  : 'ART & Laudos — Entre como Assinante/Admin ou escolha um Plano Pago'
+              }
+              className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs font-black border transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 active:scale-95 ${
+                activeTab === 'reports'
+                  ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-amber-500/20'
+                  : hasServiceAccess
+                  ? 'bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-slate-800 text-slate-900 dark:text-amber-400 border-amber-500/60'
+                  : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
               }`}
             >
-              {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4 text-amber-400" />}
-              <span>Menu</span>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isMenuOpen ? 'rotate-180' : ''}`} />
+              <FileCheck2 className={`w-4 h-4 shrink-0 ${activeTab === 'reports' ? 'text-slate-950' : 'text-amber-500'}`} />
+              <span>ART &amp; Laudos</span>
+              {!hasServiceAccess ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                  <Lock className="w-2.5 h-2.5 shrink-0" />
+                  <span className="hidden sm:inline">{isUserAuthenticated ? 'Plano Pago' : 'Entrar / Plano'}</span>
+                </span>
+              ) : (
+                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+                  activeTab === 'reports'
+                    ? 'bg-slate-950/15 text-slate-950'
+                    : isAdminAuthenticated || hasProAccess
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                }`}>
+                  {isAdminAuthenticated
+                    ? 'Admin'
+                    : hasProAccess
+                    ? 'Pro'
+                    : techDocsCount > 0
+                    ? `${techDocsCount}`
+                    : 'Ativo'}
+                </span>
+              )}
             </button>
-
-            {isMenuOpen && (
-              <div className="absolute left-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Menu Principal do Sistema
-                  </span>
-                  <span className="text-[11px] font-semibold text-slate-400">
-                    {tabs.length} módulos
-                  </span>
-                </div>
-
-                <div className="max-h-[65vh] overflow-y-auto py-2 space-y-1">
-                  {tabs.map((tab) => {
-                    const Icon = tab.icon;
-                    const isActive = activeTab === tab.id;
-                    const isReports = tab.id === 'reports';
-                    const isLockedService = !hasServiceAccess && SERVICE_TABS.includes(tab.id);
-
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => handleSelectFromMenu(tab.id)}
-                        className={`w-full text-left px-3 py-2.5 rounded-2xl transition flex items-center justify-between gap-3 cursor-pointer ${
-                          isActive
-                            ? 'bg-amber-500 text-slate-950'
-                            : isReports
-                            ? 'bg-amber-500/10 hover:bg-amber-500/20 text-slate-900 dark:text-white border border-amber-500/30'
-                            : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                            isActive
-                              ? 'bg-slate-950/15 text-slate-950'
-                              : isReports
-                              ? 'bg-amber-500 text-slate-950'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                          }`}>
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-xs font-black truncate flex items-center gap-1.5">
-                              <span>{isReports ? 'Emissão de ART & Laudos' : tab.label}</span>
-                              {isLockedService && <Lock className="w-3 h-3 text-amber-500 shrink-0" />}
-                            </div>
-                            <div className={`text-[11px] truncate ${
-                              isActive ? 'text-slate-900/80' : 'text-slate-500 dark:text-slate-400'
-                            }`}>
-                              {isLockedService ? 'Requer plano pago (Cadastro Gratuito só vê oportunidades)' : tab.description}
-                            </div>
-                          </div>
-                        </div>
-
-                        {isLockedService ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                            Plano Pago
-                          </span>
-                        ) : tab.badge ? (
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
-                            isActive
-                              ? 'bg-slate-950/15 text-slate-950'
-                              : tab.badgeColor || 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                          }`}>
-                            {tab.badge}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Scrollable Tabs */}
-          <div className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-1.5 shadow-xs flex items-center space-x-1 overflow-x-auto no-scrollbar">
+          {/* Right Utility Actions (Stays aligned right on Row 1, desktop stays on far right) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto lg:order-3">
+            {/* Sacar p/ MP */}
+            {onOpenWithdrawalModal && (
+              <button
+                onClick={onOpenWithdrawalModal}
+                title="Sacar R$ 1.834,80 via PIX p/ Mercado Pago"
+                className="relative flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/20 transition whitespace-nowrap shrink-0 cursor-pointer active:scale-95 border border-emerald-400/50 animate-pulse"
+              >
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-400"></span>
+                </span>
+                <Wallet className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
+                <span className="hidden xl:inline">Sacar R$ 1.834,80 p/ MP</span>
+                <span className="hidden sm:inline xl:hidden">Sacar R$ 1.834,80</span>
+                <span className="sm:hidden">Sacar</span>
+              </button>
+            )}
+
+            {/* Direct Baixar App Button */}
+            {onOpenInstallModal && (
+              <button
+                onClick={onOpenInstallModal}
+                title="Baixar App no Celular ou Computador"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-2 sm:py-2.5 rounded-2xl text-xs font-black bg-amber-500/10 hover:bg-amber-500 text-amber-600 dark:text-amber-400 hover:text-slate-950 border border-amber-500/30 transition whitespace-nowrap shrink-0 cursor-pointer shadow-xs active:scale-95"
+              >
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden xl:inline">Baixar App</span>
+                <span className="xl:hidden">App</span>
+              </button>
+            )}
+
+            {/* Language Selector */}
+            <div className="shrink-0">
+              <LanguageSelector variant="nav" showLabel={true} />
+            </div>
+          </div>
+
+          {/* Scrollable Tabs (Full-width Row 2 on < lg so it NEVER squishes to 0px; middle flex-1 on >= lg) */}
+          <div className="w-full lg:w-auto lg:flex-1 lg:order-2 min-w-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-1.5 shadow-xs flex items-center space-x-1 overflow-x-auto no-scrollbar">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -291,40 +497,6 @@ export const Navigation: React.FC<NavigationProps> = ({
                 </button>
               );
             })}
-          </div>
-
-          {/* Sacar p/ MP */}
-          {onOpenWithdrawalModal && (
-            <button
-              onClick={onOpenWithdrawalModal}
-              title="Sacar R$ 1.834,80 via PIX p/ Mercado Pago"
-              className="relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl text-xs font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/20 transition whitespace-nowrap shrink-0 cursor-pointer active:scale-95 border border-emerald-400/50 animate-pulse"
-            >
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-400"></span>
-              </span>
-              <Wallet className="w-3.5 h-3.5 text-emerald-200" />
-              <span className="hidden sm:inline">Sacar R$ 1.834,80 p/ MP</span>
-              <span className="sm:hidden">Sacar R$ 1.834,80</span>
-            </button>
-          )}
-
-          {/* Direct Baixar App Button */}
-          {onOpenInstallModal && (
-            <button
-              onClick={onOpenInstallModal}
-              title="Baixar App no Celular ou Computador"
-              className="hidden lg:flex items-center gap-1.5 px-3 py-2.5 rounded-2xl text-xs font-black bg-amber-500/10 hover:bg-amber-500 text-amber-600 dark:text-amber-400 hover:text-slate-950 border border-amber-500/30 transition whitespace-nowrap shrink-0 cursor-pointer shadow-xs active:scale-95"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Baixar App</span>
-            </button>
-          )}
-
-          {/* Language Selector */}
-          <div className="shrink-0">
-            <LanguageSelector variant="nav" showLabel={true} />
           </div>
         </div>
       </div>

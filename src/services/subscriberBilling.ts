@@ -913,3 +913,242 @@ export async function syncEnrolledSubscriberToServer(payload: {
   }
 }
 
+export interface VerifiedSubscriberAccess {
+  isAdmin: boolean;
+  isMasterEmail: boolean;
+  verified: boolean;
+  hasServiceAccess: boolean;
+  hasProLaudoAccess: boolean;
+  planId: string;
+  planCode: string;
+  planName: string;
+  price: number;
+  billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
+}
+
+export async function verifyAuthenticatedSubscriberAccess(
+  email?: string | null,
+  explicitAdminToken?: string | null
+): Promise<VerifiedSubscriberAccess> {
+  const token = explicitAdminToken || getCachedAdminSession()?.token;
+  const cleanEmail = (email || '').trim().toLowerCase();
+
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch('/api/subscribers/verify-access', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ email: cleanEmail || undefined }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.hasServiceAccess === 'boolean') {
+        return data as VerifiedSubscriberAccess;
+      }
+    }
+  } catch {
+    // Fallback to local records below
+  }
+
+  if (token) {
+    return {
+      isAdmin: true,
+      isMasterEmail: true,
+      verified: true,
+      hasServiceAccess: true,
+      hasProLaudoAccess: true,
+      planId: 'plan-001',
+      planCode: 'Mensal Pro',
+      planName: 'Admin Master Global',
+      price: 29.90,
+      billingCycle: 'Mensal',
+    };
+  }
+
+  if (cleanEmail) {
+    const local = getStoredPayments();
+    const matched = local.find(
+      (s) =>
+        s.subscriberEmail &&
+        s.subscriberEmail.trim().toLowerCase() === cleanEmail &&
+        s.status === 'Aprovado' &&
+        Number(s.amount) > 0
+    );
+    if (matched) {
+      const lower = (matched.planType || '').toLowerCase();
+      const isAnnual = lower.includes('anual') || Number(matched.amount) >= 400;
+      const isPro = lower.includes('pro');
+      return {
+        isAdmin: false,
+        isMasterEmail: false,
+        verified: true,
+        hasServiceAccess: true,
+        hasProLaudoAccess: isPro,
+        planId: isAnnual ? 'plan-005' : isPro ? 'plan-001' : lower.includes('construtor') ? 'plan-002' : 'plan-003',
+        planCode: matched.planType,
+        planName: matched.planType,
+        price: Number(matched.amount) || 0,
+        billingCycle: isAnnual ? 'Anual' : 'Mensal',
+      };
+    }
+  }
+
+  return {
+    isAdmin: false,
+    isMasterEmail: false,
+    verified: Boolean(cleanEmail),
+    hasServiceAccess: false,
+    hasProLaudoAccess: false,
+    planId: 'plan-004',
+    planCode: 'Gratuito Lançamento',
+    planName: 'Cadastro Gratuito',
+    price: 0,
+    billingCycle: 'Gratuito',
+  };
+}
+
+export interface SubscriberBillingNotice {
+  id: string;
+  title: string;
+  reasonCode: string;
+  message: string;
+  promoDurationMonths: number;
+  reducedPlansSummary: Array<{ name: string; price: number; cycle: string }>;
+  targetSubscribersCount: number;
+  sentAt: string;
+  sentBy: string;
+  channels: string[];
+  active: boolean;
+}
+
+export interface NoticeDispatchRecipient {
+  id: string;
+  subscriberName: string;
+  subscriberEmail?: string;
+  subscriberPhone?: string;
+  planType: string;
+  amount: number;
+  billingLink?: string;
+  pixTicketUrl?: string;
+  pixCopyPaste?: string;
+  personalizedMessage: string;
+}
+
+export const DEFAULT_CHECKOUT_RECOVERY_NOTICE =
+  'Olá! Você está recebendo esta nova cobrança porque os valores anteriores não foram compensados por conta de um erro técnico que havia no checkout do Mercado Pago (problema já corrigido). Para apoiar nossos assinantes, reduzimos os valores dos planos por 6 meses: Mensal Básico R$ 25,00/mês, Mensal Pro R$ 29,90/mês, Mensal Construtor R$ 49,90/mês e Anual Construtor R$ 499,00/ano.';
+
+export function buildCheckoutRecoveryMessage(
+  subscriber: {
+    subscriberName: string;
+    planType: string;
+    amount: number;
+    billingLink?: string;
+    pixTicketUrl?: string;
+    pixCopyPaste?: string;
+  },
+  customIntro?: string
+): string {
+  const amountFormatted = (Number(subscriber.amount) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  const intro = (customIntro || '').trim()
+    ? customIntro!.trim()
+    : 'Informamos que você está recebendo esta nova cobrança porque os valores anteriores não foram compensados por conta de um erro que havia no checkout do Mercado Pago (já corrigido).\n\nReduzimos os valores dos planos por *6 meses*:\n• *Mensal Básico:* R$ 25,00/mês\n• *Mensal Pro:* R$ 29,90/mês\n• *Mensal Construtor:* R$ 49,90/mês\n• *Anual Construtora/Empreiteira:* R$ 499,00/ano';
+
+  return [
+    `Olá, *${subscriber.subscriberName}*!`,
+    ``,
+    intro,
+    ``,
+    `📌 *Sua assinatura / cobrança atualizada:*`,
+    `• *Plano:* ${subscriber.planType}`,
+    `• *Novo valor reduzido (6 meses):* R$ ${amountFormatted}`,
+    subscriber.billingLink ? `\n💳 *Pagar via Mercado Pago (Checkout Corrigido):*\n${subscriber.billingLink}` : '',
+    subscriber.pixTicketUrl ? `\n🧾 *Fatura PIX Direta (QR Code):*\n${subscriber.pixTicketUrl}` : '',
+    subscriber.pixCopyPaste ? `\n💠 *PIX Copia e Cola (Mercado Pago):*\n${subscriber.pixCopyPaste}` : '',
+    `\nAssim que compensar, a liberação no sistema é automática.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export async function fetchActiveSubscriberNotices(): Promise<{
+  notices: SubscriberBillingNotice[];
+  uncompensatedPendingCount: number;
+}> {
+  try {
+    const res = await fetch('/api/subscribers/notices');
+    if (!res.ok) throw new Error('Falha ao carregar comunicados');
+    const data = await res.json();
+    return {
+      notices: Array.isArray(data.notices) ? data.notices : [],
+      uncompensatedPendingCount: Number(data.uncompensatedPendingCount) || 0,
+    };
+  } catch {
+    return {
+      notices: [
+        {
+          id: 'notice-mp-checkout-6m-fallback',
+          title: 'Comunicado Importante: Erro no Checkout Mercado Pago & Planos Reduzidos por 6 Meses',
+          reasonCode: 'mercadopago_checkout_error_6m_promo',
+          message: DEFAULT_CHECKOUT_RECOVERY_NOTICE,
+          promoDurationMonths: 6,
+          reducedPlansSummary: [
+            { name: 'Mensal Básico', price: 25.00, cycle: 'mês' },
+            { name: 'Mensal Pro', price: 29.90, cycle: 'mês' },
+            { name: 'Mensal Construtor', price: 49.90, cycle: 'mês' },
+            { name: 'Anual Construtor / Empreiteira', price: 499.00, cycle: 'ano' },
+          ],
+          targetSubscribersCount: 1,
+          sentAt: new Date().toISOString(),
+          sentBy: 'Admin Master',
+          channels: ['Painel do Assinante', 'WhatsApp', 'E-mail'],
+          active: true,
+        },
+      ],
+      uncompensatedPendingCount: 1,
+    };
+  }
+}
+
+export async function sendSubscriberBillingNotice(
+  params: {
+    subscriberIds?: string[];
+    customMessage?: string;
+    title?: string;
+    channels?: string[];
+  },
+  explicitToken?: string
+): Promise<{
+  success: boolean;
+  notice: SubscriberBillingNotice;
+  recipientsCount: number;
+  recipients: NoticeDispatchRecipient[];
+  subscriberPayments: SubscriberPayment[];
+}> {
+  const sessionToken = explicitToken || getCachedAdminSession()?.token;
+  if (!sessionToken) {
+    throw new Error('Autenticação Admin Master necessária para enviar comunicado.');
+  }
+
+  const res = await fetch('/api/admin/subscribers-billing/send-notice', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${sessionToken}`,
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao registrar e enviar comunicado aos assinantes.');
+  }
+
+  const data = await res.json();
+  if (Array.isArray(data.subscriberPayments)) {
+    saveStoredPayments(data.subscriberPayments);
+  }
+  return data;
+}
+

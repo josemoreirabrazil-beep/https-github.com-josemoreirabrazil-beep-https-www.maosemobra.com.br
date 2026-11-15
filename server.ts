@@ -551,9 +551,14 @@ let subscriberPayments: Array<{
     paymentDate: '2026-08-28',
     dueDate: '2026-09-02',
     reference: 'Renovação Mensal Pro Setembro',
-    notes: 'Aguardando confirmação do comprovante PIX.',
+    notes: 'Aguardando confirmação do comprovante PIX. Comunicado enviado sobre erro no checkout do Mercado Pago e redução de planos por 6 meses.',
     transactionId: 'PIX-PENDING-771829',
     projectCount: 3,
+    billingStatus: 'Enviada',
+    billingSentAt: new Date().toISOString(),
+    billingChannel: 'Comunicado Sistema',
+    billingMessage:
+      'Olá, *Topografia & Sondagem Litoral*!\n\nInformamos que você está recebendo esta nova cobrança porque pagamentos anteriores não foram compensados devido a um erro temporário que havia no checkout do Mercado Pago (já corrigido).\n\nBoa notícia: para facilitar sua regularização, reduzimos os valores dos nossos planos por *6 meses*:\n• *Mensal Básico:* R$ 25,00/mês\n• *Mensal Pro:* R$ 29,90/mês\n• *Mensal Construtor:* R$ 49,90/mês\n• *Anual Construtora/Empreiteira:* R$ 499,00/ano\n\nSeu valor atualizado para o plano *Mensal Pro* é *R$ 29,90*. Assim que o pagamento for compensado, seu acesso será liberado automaticamente.',
   },
   {
     id: 'sub-pay-007',
@@ -572,6 +577,108 @@ let subscriberPayments: Array<{
     transactionId: 'MP-FEE-881920',
     projectCount: 1,
   }
+];
+
+export interface SubscriberBillingNotice {
+  id: string;
+  title: string;
+  reasonCode: 'mercadopago_checkout_error_6m_promo';
+  message: string;
+  promoDurationMonths: number;
+  reducedPlansSummary: Array<{ name: string; price: number; cycle: string }>;
+  targetSubscriberIds: string[];
+  targetSubscribersCount: number;
+  sentAt: string;
+  sentBy: string;
+  channels: string[];
+  active: boolean;
+}
+
+const REDUCED_PLANS_6M_SUMMARY = [
+  { name: 'Mensal Básico', price: 25.00, cycle: 'mês' },
+  { name: 'Mensal Pro', price: 29.90, cycle: 'mês' },
+  { name: 'Mensal Construtor', price: 49.90, cycle: 'mês' },
+  { name: 'Anual Construtor / Empreiteira', price: 499.00, cycle: 'ano' },
+];
+
+const DEFAULT_CHECKOUT_RECOVERY_NOTICE_TEXT =
+  'Olá! Você está recebendo uma cobrança atualizada da plataforma Mãos em Obra porque os valores anteriores não foram compensados devido a um erro técnico que havia no checkout do Mercado Pago (problema já corrigido). Para apoiar nossos assinantes, reduzimos os valores dos planos por 6 meses: Mensal Básico R$ 25,00/mês, Mensal Pro R$ 29,90/mês, Mensal Construtor R$ 49,90/mês e Anual Construtor R$ 499,00/ano. Regularize pelo link atualizado ou PIX para liberação automática.';
+
+function buildSubscriberCheckoutRecoveryMessage(
+  sub: {
+    subscriberName: string;
+    planType: string;
+    amount: number;
+    billingLink?: string;
+    pixTicketUrl?: string;
+    pixCopyPaste?: string;
+  },
+  customIntro?: string
+): string {
+  const amountFormatted = (Number(sub.amount) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  const intro = (customIntro || '').trim()
+    ? customIntro!.trim()
+    : 'Informamos que você está recebendo esta nova cobrança porque os valores anteriores não foram compensados por conta de um erro que havia no checkout do Mercado Pago (já corrigido).\n\nReduzimos os valores dos planos por *6 meses*:\n• *Mensal Básico:* R$ 25,00/mês\n• *Mensal Pro:* R$ 29,90/mês\n• *Mensal Construtor:* R$ 49,90/mês\n• *Anual Construtora/Empreiteira:* R$ 499,00/ano';
+
+  return [
+    `Olá, *${sub.subscriberName}*!`,
+    ``,
+    intro,
+    ``,
+    `📌 *Sua assinatura / cobrança atualizada:*`,
+    `• *Plano:* ${sub.planType}`,
+    `• *Novo valor reduzido (promoção 6 meses):* R$ ${amountFormatted}`,
+    sub.billingLink ? `\n💳 *Pagar agora via Mercado Pago (Checkout Corrigido):*\n${sub.billingLink}` : '',
+    sub.pixTicketUrl ? `\n🧾 *Fatura PIX Direta (QR Code):*\n${sub.pixTicketUrl}` : '',
+    sub.pixCopyPaste ? `\n💠 *PIX Copia e Cola (Mercado Pago):*\n${sub.pixCopyPaste}` : '',
+    `\nAssim que o pagamento for compensado, seu acesso completo é liberado automaticamente.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function getUncompensatedChargeSubscribers() {
+  return subscriberPayments.filter(
+    (s) =>
+      Number(s.amount) > 0 &&
+      s.mpVerifiedStatus !== 'approved' &&
+      s.billingStatus !== 'Pago no MP' &&
+      (s.status === 'Pendente' ||
+        s.status === 'Atrasado' ||
+        s.billingStatus === 'Cobrança Emitida' ||
+        s.billingStatus === 'Enviada')
+  );
+}
+
+const subscriberNotices: SubscriberBillingNotice[] = [
+  {
+    id: 'notice-mp-checkout-6m-001',
+    title: 'Comunicado Importante: Erro no Checkout Mercado Pago & Planos Reduzidos por 6 Meses',
+    reasonCode: 'mercadopago_checkout_error_6m_promo',
+    message: DEFAULT_CHECKOUT_RECOVERY_NOTICE_TEXT,
+    promoDurationMonths: 6,
+    reducedPlansSummary: REDUCED_PLANS_6M_SUMMARY,
+    targetSubscriberIds: subscriberPayments
+      .filter(
+        (s) =>
+          Number(s.amount) > 0 &&
+          s.mpVerifiedStatus !== 'approved' &&
+          s.billingStatus !== 'Pago no MP' &&
+          (s.status === 'Pendente' || s.status === 'Atrasado')
+      )
+      .map((s) => s.id),
+    targetSubscribersCount: subscriberPayments.filter(
+      (s) =>
+        Number(s.amount) > 0 &&
+        s.mpVerifiedStatus !== 'approved' &&
+        s.billingStatus !== 'Pago no MP' &&
+        (s.status === 'Pendente' || s.status === 'Atrasado')
+    ).length,
+    sentAt: new Date().toISOString(),
+    sentBy: 'Admin Master (Moreira Brasil Serviços)',
+    channels: ['Painel do Assinante', 'WhatsApp', 'E-mail'],
+    active: true,
+  },
 ];
 
 // Model for Client and Provider Receipts (Tracked and auto-updated via Mercado Pago Webhooks)
@@ -1225,6 +1332,12 @@ function loadFiscalVault() {
     if (!parsed || typeof parsed !== 'object') return;
 
     const cfg = parsed.fiscalConfig || {};
+    if (cfg.companyName) fiscalConfig.companyName = String(cfg.companyName).trim();
+    if (cfg.cnpj && String(cfg.cnpj).replace(/\D/g, '').length === 14) {
+      const d = String(cfg.cnpj).replace(/\D/g, '');
+      fiscalConfig.cnpj = d;
+      fiscalConfig.cnpjFormatted = `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12, 14)}`;
+    }
     if (typeof cfg.autoEmitOnPayment === 'boolean') fiscalConfig.autoEmitOnPayment = cfg.autoEmitOnPayment;
     if (cfg.environment === 'homologacao' || cfg.environment === 'producao') fiscalConfig.environment = cfg.environment;
     if (cfg.regimeTributario) fiscalConfig.regimeTributario = cfg.regimeTributario;
@@ -3028,6 +3141,97 @@ app.get('/api/subscribers/real-status', async (req, res) => {
   });
 });
 
+// Verify authenticated user's access level (Admin Master vs Enrolled Active Subscriber vs Free/Visitor)
+app.post('/api/subscribers/verify-access', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+  const isAdminVerified = Boolean(token && verifyMasterToken(token));
+  const rawEmail = String((req.body && req.body.email) || '').trim().toLowerCase();
+
+  if (isAdminVerified) {
+    return res.json({
+      success: true,
+      isAdmin: true,
+      isMasterEmail: true,
+      verified: true,
+      hasServiceAccess: true,
+      hasProLaudoAccess: true,
+      planId: 'plan-001',
+      planCode: 'Mensal Pro',
+      planName: 'Admin Master Global',
+      price: 29.90,
+      billingCycle: 'Mensal',
+    });
+  }
+
+  if (rawEmail && rawEmail === MASTER_EMAIL.toLowerCase()) {
+    return res.json({
+      success: true,
+      isAdmin: false,
+      isMasterEmail: true,
+      verified: true,
+      hasServiceAccess: true,
+      hasProLaudoAccess: true,
+      planId: 'plan-001',
+      planCode: 'Mensal Pro',
+      planName: 'Mensal Pro (Master)',
+      price: 29.90,
+      billingCycle: 'Mensal',
+    });
+  }
+
+  if (rawEmail) {
+    const matchedPaid = subscriberPayments.find(
+      (s) =>
+        s.subscriberEmail &&
+        s.subscriberEmail.trim().toLowerCase() === rawEmail &&
+        s.status === 'Aprovado' &&
+        Number(s.amount) > 0
+    );
+
+    if (matchedPaid) {
+      const planLower = (matchedPaid.planType || '').toLowerCase();
+      const isAnnual = planLower.includes('anual') || Number(matchedPaid.amount) >= 400;
+      const isPro = planLower === 'mensal pro' || planLower.includes('mensal pro') || planLower === 'pro';
+      const planId = isAnnual
+        ? 'plan-005'
+        : isPro
+        ? 'plan-001'
+        : planLower.includes('construtor')
+        ? 'plan-002'
+        : 'plan-003';
+
+      return res.json({
+        success: true,
+        isAdmin: false,
+        isMasterEmail: false,
+        verified: true,
+        hasServiceAccess: true,
+        hasProLaudoAccess: isPro,
+        planId,
+        planCode: matchedPaid.planType,
+        planName: matchedPaid.planType,
+        price: Number(matchedPaid.amount) || 0,
+        billingCycle: isAnnual ? 'Anual' : 'Mensal',
+      });
+    }
+  }
+
+  return res.json({
+    success: true,
+    isAdmin: false,
+    isMasterEmail: false,
+    verified: Boolean(rawEmail),
+    hasServiceAccess: false,
+    hasProLaudoAccess: false,
+    planId: 'plan-004',
+    planCode: 'Gratuito Lançamento',
+    planName: 'Cadastro Gratuito',
+    price: 0,
+    billingCycle: 'Gratuito',
+  });
+});
+
 // Register or sync an active subscriber enrollment (e.g. after checkout/plan activation)
 app.post('/api/subscribers/enroll-active', (req, res) => {
   const {
@@ -3303,9 +3507,11 @@ async function issueSingleSubscriberMercadoPagoCharge(item: any, req: express.Re
   const billingMessage = [
     `Olá, *${subscriberName}*!`,
     ``,
-    `Segue sua cobrança atualizada da plataforma *Mãos em Obra*:`,
+    `Você está recebendo esta cobrança da plataforma *Mãos em Obra* porque pagamentos anteriores não foram compensados devido a um erro que havia no checkout do Mercado Pago (já corrigido).`,
+    `Aproveitamos para confirmar que *reduzimos os valores dos planos por 6 meses* (Básico R$ 25,00 • Pro R$ 29,90 • Construtor R$ 49,90 • Anual R$ 499,00).`,
+    ``,
     `• *Plano:* ${planType}`,
-    `• *Valor:* R$ ${amountFormatted}`,
+    `• *Valor com desconto (6 meses):* R$ ${amountFormatted}`,
     `• *Vencimento:* ${dueFormatted}`,
     `• *Referência:* ${cleanRef}`,
     billingLink ? `\n💳 *Pagar via Mercado Pago (Cartão, PIX ou Boleto):*\n${billingLink}` : '',
@@ -3590,6 +3796,130 @@ app.post('/api/admin/subscribers-billing/mark-sent', (req, res) => {
   }
 
   return res.json({ success: true, updatedCount, subscriberPayments });
+});
+
+// Public endpoint (PII-safe): Get active official notices for subscribers
+app.get('/api/subscribers/notices', (_req, res) => {
+  const activeNotices = subscriberNotices.filter((n) => n.active);
+  const uncompensatedCount = getUncompensatedChargeSubscribers().length;
+  return res.json({
+    success: true,
+    notices: activeNotices.map((n) => ({
+      id: n.id,
+      title: n.title,
+      reasonCode: n.reasonCode,
+      message: n.message,
+      promoDurationMonths: n.promoDurationMonths,
+      reducedPlansSummary: n.reducedPlansSummary,
+      targetSubscribersCount: Math.max(n.targetSubscribersCount, uncompensatedCount),
+      sentAt: n.sentAt,
+      sentBy: n.sentBy,
+      channels: n.channels,
+      active: n.active,
+    })),
+    uncompensatedPendingCount: uncompensatedCount,
+  });
+});
+
+// Admin Master endpoint: Send/register official checkout recovery & 6-month reduced pricing notice to subscribers receiving charges
+app.post('/api/admin/subscribers-billing/send-notice', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const { subscriberIds, customMessage, title, channels } = req.body || {};
+  const requestedIds: string[] = Array.isArray(subscriberIds) ? subscriberIds : [];
+  const allUncompensated = getUncompensatedChargeSubscribers();
+
+  let targetSubscribers =
+    requestedIds.length > 0
+      ? subscriberPayments.filter(
+          (s) =>
+            requestedIds.includes(s.id) &&
+            Number(s.amount) > 0 &&
+            s.mpVerifiedStatus !== 'approved' &&
+            s.billingStatus !== 'Pago no MP'
+        )
+      : allUncompensated;
+
+  if (targetSubscribers.length === 0 && requestedIds.length === 0) {
+    targetSubscribers = subscriberPayments.filter((s) => Number(s.amount) > 0 && s.status !== 'Isento / Cortesia');
+  }
+
+  const nowIso = new Date().toISOString();
+  const noticeTitle =
+    String(title || '').trim() ||
+    'Comunicado Importante: Erro no Checkout Mercado Pago & Planos Reduzidos por 6 Meses';
+  const noticeText = String(customMessage || '').trim() || DEFAULT_CHECKOUT_RECOVERY_NOTICE_TEXT;
+  const activeChannels: string[] =
+    Array.isArray(channels) && channels.length > 0
+      ? channels
+      : ['Painel do Assinante', 'WhatsApp', 'E-mail'];
+
+  const recipients = targetSubscribers.map((sub) => {
+    const personalizedMessage = buildSubscriberCheckoutRecoveryMessage(sub, customMessage);
+    if (sub.billingStatus !== 'Pago no MP') {
+      sub.billingStatus = 'Enviada';
+    }
+    sub.billingSentAt = nowIso;
+    sub.billingChannel = 'Comunicado + Cobrança';
+    sub.billingMessage = personalizedMessage;
+    const noteSuffix = `Comunicado erro checkout MP & redução 6 meses enviado em ${new Date().toLocaleDateString('pt-BR')}.`;
+    sub.notes = sub.notes?.includes('erro checkout MP') ? sub.notes : `${sub.notes ? sub.notes + ' • ' : ''}${noteSuffix}`;
+
+    return {
+      id: sub.id,
+      subscriberName: sub.subscriberName,
+      subscriberEmail: sub.subscriberEmail,
+      subscriberPhone: sub.subscriberPhone,
+      planType: sub.planType,
+      amount: sub.amount,
+      billingLink: sub.billingLink,
+      pixTicketUrl: sub.pixTicketUrl,
+      pixCopyPaste: sub.pixCopyPaste,
+      personalizedMessage,
+    };
+  });
+
+  // Deactivate previous notices of the same reasonCode and prepend the newly issued notice
+  for (const prev of subscriberNotices) {
+    if (prev.reasonCode === 'mercadopago_checkout_error_6m_promo') {
+      prev.active = false;
+    }
+  }
+
+  const createdNotice: SubscriberBillingNotice = {
+    id: `notice-${Date.now()}`,
+    title: noticeTitle,
+    reasonCode: 'mercadopago_checkout_error_6m_promo',
+    message: noticeText,
+    promoDurationMonths: 6,
+    reducedPlansSummary: REDUCED_PLANS_6M_SUMMARY,
+    targetSubscriberIds: recipients.map((r) => r.id),
+    targetSubscribersCount: recipients.length,
+    sentAt: nowIso,
+    sentBy: 'Admin Master Global',
+    channels: activeChannels,
+    active: true,
+  };
+  subscriberNotices.unshift(createdNotice);
+
+  recordAuditLog(
+    'CONFIG_CHANGE',
+    'INFO',
+    req.ip || '127.0.0.1',
+    `Comunicado oficial (erro checkout Mercado Pago + redução de planos por 6 meses) emitido para ${recipients.length} assinante(s) em cobrança.`
+  );
+
+  return res.json({
+    success: true,
+    notice: createdNotice,
+    recipientsCount: recipients.length,
+    recipients,
+    subscriberPayments,
+  });
 });
 
 
@@ -5100,6 +5430,26 @@ app.post('/api/fiscal/config', (req, res) => {
     }));
   }
 
+  if (body.companyName !== undefined && String(body.companyName).trim()) {
+    fiscalConfig.companyName = String(body.companyName).trim();
+    fiscalConfig.certificate.companyName = fiscalConfig.companyName;
+  }
+  if (body.cnpj !== undefined) {
+    const cleanCnpj = String(body.cnpj).replace(/\D/g, '');
+    if (cleanCnpj.length !== 14 || /^(\d)\1{13}$/.test(cleanCnpj)) {
+      return res.status(400).json({
+        error: 'CNPJ da empresa inválido. Informe os 14 dígitos numéricos válidos do CNPJ.',
+      });
+    }
+    const formattedCnpj = `${cleanCnpj.slice(0, 2)}.${cleanCnpj.slice(2, 5)}.${cleanCnpj.slice(5, 8)}/${cleanCnpj.slice(8, 12)}-${cleanCnpj.slice(12, 14)}`;
+    fiscalConfig.cnpj = cleanCnpj;
+    fiscalConfig.cnpjFormatted = formattedCnpj;
+    fiscalConfig.certificate.cnpj = cleanCnpj;
+    fiscalConfig.certificate.cnpjFormatted = formattedCnpj;
+    const subj = fiscalConfig.certificate.subjectName || '';
+    fiscalConfig.certificate.cnpjMatchesEmitter =
+      subj.includes(cleanCnpj) || subj.includes(formattedCnpj);
+  }
   if (typeof body.autoEmitOnPayment === 'boolean') fiscalConfig.autoEmitOnPayment = body.autoEmitOnPayment;
   if (body.environment === 'homologacao' || body.environment === 'producao') fiscalConfig.environment = body.environment;
   if (body.regimeTributario) fiscalConfig.regimeTributario = body.regimeTributario;
@@ -5451,9 +5801,34 @@ app.post('/api/fiscal/provider/test-connection', async (req, res) => {
   const provider = api.provider;
   const providerLabel = PROVIDER_LABELS[provider] || provider;
   const endpointBase = getActiveProviderEndpoint();
-  const useMtls = Boolean(
-    api.useStoredCertificateMtls && activeCertificatePem && activeCertificatePrivateKeyPem
-  );
+  const cnpjValid = /^\d{14}$/.test(fiscalConfig.cnpj) && !/^(\d)\1{13}$/.test(fiscalConfig.cnpj);
+  const certificateLoaded = Boolean(activeCertificatePem && activeCertificatePrivateKeyPem);
+  const useMtls = Boolean(api.useStoredCertificateMtls && certificateLoaded);
+  const tokenRequired = provider === 'focus_nfe' || provider === 'nfe_io' || provider === 'plugnotas';
+  const tokenConfigured = Boolean(storedFiscalApiToken && storedFiscalApiToken.trim().length > 0);
+
+  const credentialChecks = {
+    cnpjValid,
+    cnpjFormatted: fiscalConfig.cnpjFormatted,
+    companyName: fiscalConfig.companyName,
+    certificateLoaded,
+    mtlsActive: useMtls,
+    tokenRequired,
+    tokenConfigured,
+    provider,
+    providerLabel,
+    endpoint: endpointBase,
+    environment: fiscalConfig.environment,
+  };
+
+  if (!cnpjValid) {
+    const msg = 'CNPJ da empresa inválido. Informe um CNPJ válido de 14 dígitos antes de testar a API.';
+    api.lastConnectionTestAt = new Date().toISOString();
+    api.lastConnectionStatus = 'Falha na Conexão';
+    api.lastConnectionMessage = msg;
+    saveFiscalVault();
+    return res.status(400).json({ success: false, connected: false, error: msg, message: msg, credentialChecks, config: getSanitizedFiscalConfig() });
+  }
 
   if (!endpointBase) {
     const msg = 'Informe o endpoint da Prefeitura ou provedor antes de testar a conexão.';
@@ -5461,22 +5836,45 @@ app.post('/api/fiscal/provider/test-connection', async (req, res) => {
     api.lastConnectionStatus = 'Falha na Conexão';
     api.lastConnectionMessage = msg;
     saveFiscalVault();
-    return res.status(400).json({ error: msg });
+    return res.status(400).json({ success: false, connected: false, error: msg, message: msg, credentialChecks, config: getSanitizedFiscalConfig() });
+  }
+
+  if (tokenRequired && !tokenConfigured) {
+    const msg = `Credencial ausente: o provedor ${providerLabel} exige um API Token / Chave Secreta para autenticar o CNPJ ${fiscalConfig.cnpjFormatted}.`;
+    api.lastConnectionTestAt = new Date().toISOString();
+    api.lastConnectionStatus = 'Falha na Conexão';
+    api.lastConnectionMessage = msg;
+    const log = recordTransmissionLog({
+      provider,
+      providerLabel,
+      action: 'TESTE_CONEXAO',
+      endpoint: endpointBase,
+      usedMtlsCertificate: useMtls,
+      success: false,
+      message: msg,
+    });
+    saveFiscalVault();
+    return res.json({
+      success: false,
+      connected: false,
+      message: msg,
+      credentialChecks,
+      config: getSanitizedFiscalConfig(),
+      log,
+    });
   }
 
   let probeUrl = endpointBase;
   const headers: Record<string, string> = {};
   if (provider === 'focus_nfe') {
     probeUrl = `${endpointBase}/v2/empresas/${fiscalConfig.cnpj}`;
-    if (storedFiscalApiToken) {
-      headers.Authorization = `Basic ${Buffer.from(`${storedFiscalApiToken}:`).toString('base64')}`;
-    }
+    headers.Authorization = `Basic ${Buffer.from(`${storedFiscalApiToken}:`).toString('base64')}`;
   } else if (provider === 'nfe_io') {
     probeUrl = `${endpointBase}/v1/companies/${api.apiCompanyId || fiscalConfig.cnpj}`;
-    if (storedFiscalApiToken) headers.Authorization = storedFiscalApiToken;
+    headers.Authorization = storedFiscalApiToken;
   } else if (provider === 'plugnotas') {
     probeUrl = `${endpointBase}/empresa/${fiscalConfig.cnpj}`;
-    if (storedFiscalApiToken) headers['x-api-key'] = storedFiscalApiToken;
+    headers['x-api-key'] = storedFiscalApiToken;
   } else if (provider === 'webhook_custom' && storedFiscalApiToken) {
     const hdrName = api.customHeaderName || 'Authorization';
     headers[hdrName] =
@@ -5492,9 +5890,13 @@ app.post('/api/fiscal/provider/test-connection', async (req, res) => {
       useMtls,
       timeoutMs: 10000,
     });
-    const connected = resp.statusCode > 0 && resp.statusCode < 500;
-    const msg = connected
-      ? `Conexão estabelecida com ${providerLabel} (HTTP ${resp.statusCode})${useMtls ? ' via mTLS com Certificado Digital armazenado' : ''}.`
+
+    const isAuthRejected = resp.statusCode === 401 || resp.statusCode === 403;
+    const connected = !isAuthRejected && resp.statusCode > 0 && resp.statusCode < 500;
+    const msg = isAuthRejected
+      ? `Credenciais rejeitadas por ${providerLabel} (HTTP ${resp.statusCode}). Verifique o API Token${useMtls ? ' ou o Certificado A1 vinculado' : ''} para o CNPJ ${fiscalConfig.cnpjFormatted}.`
+      : connected
+      ? `Credenciais e conexão validadas com ${providerLabel} (HTTP ${resp.statusCode})${useMtls ? ' via mTLS com Certificado Digital A1' : ''}.`
       : `Servidor respondeu HTTP ${resp.statusCode} em ${probeUrl}.`;
 
     api.lastConnectionTestAt = new Date().toISOString();
@@ -5514,10 +5916,11 @@ app.post('/api/fiscal/provider/test-connection', async (req, res) => {
     saveFiscalVault();
 
     return res.json({
-      success: true,
+      success: connected,
       connected,
       httpStatus: resp.statusCode,
       message: msg,
+      credentialChecks: { ...credentialChecks, endpoint: probeUrl, httpStatus: resp.statusCode },
       config: getSanitizedFiscalConfig(),
       log,
     });
@@ -5542,6 +5945,7 @@ app.post('/api/fiscal/provider/test-connection', async (req, res) => {
       success: false,
       connected: false,
       message: errMsg,
+      credentialChecks: { ...credentialChecks, endpoint: probeUrl },
       config: getSanitizedFiscalConfig(),
       log,
     });

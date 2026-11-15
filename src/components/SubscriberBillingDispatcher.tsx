@@ -20,7 +20,8 @@ import {
   ShieldCheck,
   Zap,
   UserPlus,
-  BadgeDollarSign
+  BadgeDollarSign,
+  Megaphone
 } from 'lucide-react';
 import type {
   Project,
@@ -38,7 +39,13 @@ import {
   markSubscribersBillingSent,
   adjustPendingSubscribersBilling,
   getReducedPlanPrice,
-  INITIAL_PLANS
+  INITIAL_PLANS,
+  DEFAULT_CHECKOUT_RECOVERY_NOTICE,
+  buildCheckoutRecoveryMessage,
+  fetchActiveSubscriberNotices,
+  sendSubscriberBillingNotice,
+  type NoticeDispatchRecipient,
+  type SubscriberBillingNotice
 } from '../services/subscriberBilling';
 import { loadServiceProviders } from '../services/storage';
 import { generateQrCodeDataUrl } from '../utils/pix';
@@ -86,9 +93,18 @@ function formatBrWhatsappUrl(phone: string, message: string): string | null {
   return `https://wa.me/${fullNumber}?text=${encodeURIComponent(message)}`;
 }
 
-function buildMailtoUrl(email: string, name: string, plan: string, amount: number, message: string): string | null {
+function buildMailtoUrl(
+  email: string,
+  name: string,
+  plan: string,
+  amount: number,
+  message: string,
+  isNotice = false
+): string | null {
   if (!email || !email.includes('@')) return null;
-  const subject = `Cobrança Mãos em Obra — ${plan} (R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+  const subject = isNotice
+    ? `Comunicado Mãos em Obra: Regularização Checkout Mercado Pago & Planos Reduzidos por 6 Meses — ${plan}`
+    : `Cobrança Mãos em Obra — ${plan} (R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
   const body = message.replace(/\*/g, '');
   return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
@@ -141,6 +157,13 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
   // QR preview modal state
   const [qrPreviewCandidate, setQrPreviewCandidate] = useState<BillableCandidate | null>(null);
   const [qrPreviewDataUrl, setQrPreviewDataUrl] = useState<string>('');
+
+  // Official Comunicado (Checkout MP Error + 6-Month Reduced Plan Prices) state
+  const [noticeMessage, setNoticeMessage] = useState<string>(DEFAULT_CHECKOUT_RECOVERY_NOTICE);
+  const [isSendingNotice, setIsSendingNotice] = useState(false);
+  const [activeNoticeMeta, setActiveNoticeMeta] = useState<SubscriberBillingNotice | null>(null);
+  const [dispatchedRecipients, setDispatchedRecipients] = useState<NoticeDispatchRecipient[]>([]);
+  const [copiedNoticeId, setCopiedNoticeId] = useState<string | null>(null);
 
   // Build unified candidates list preserving unsaved local overrides unless server data updated
   useEffect(() => {
@@ -355,6 +378,13 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
 
   useEffect(() => {
     handleSyncLiveMercadoPago(true);
+    fetchActiveSubscriberNotices()
+      .then((res) => {
+        if (res.notices.length > 0) {
+          setActiveNoticeMeta(res.notices[0]);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleToggleSelect = (id: string) => {
@@ -629,6 +659,86 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
       setQrPreviewDataUrl(url);
     } else {
       setQrPreviewDataUrl('');
+    }
+  };
+
+  const handleSendCheckoutRecoveryNotice = async () => {
+    const selectedTargets = candidates.filter(
+      (c) =>
+        selectedIds.has(c.id) &&
+        Number(c.amount) > 0 &&
+        c.mpVerifiedStatus !== 'approved' &&
+        c.billingStatus !== 'Pago no MP'
+    );
+    const pendingTargets = candidates.filter(
+      (c) =>
+        Number(c.amount) > 0 &&
+        c.mpVerifiedStatus !== 'approved' &&
+        c.billingStatus !== 'Pago no MP' &&
+        (c.status === 'Pendente' ||
+          c.status === 'Atrasado' ||
+          c.billingStatus === 'Cobrança Emitida' ||
+          c.billingStatus === 'Enviada')
+    );
+
+    const targets = pendingTargets.length > 0 ? pendingTargets : selectedTargets;
+    const targetIds = targets.map((t) => t.id);
+
+    setIsSendingNotice(true);
+    setStatusNotice(null);
+    try {
+      const res = await sendSubscriberBillingNotice(
+        {
+          subscriberIds: targetIds.length > 0 ? targetIds : undefined,
+          customMessage: noticeMessage,
+        },
+        adminToken
+      );
+
+      setActiveNoticeMeta(res.notice);
+      setDispatchedRecipients(res.recipients || []);
+
+      const serverMsgMap = new Map(
+        (res.recipients || []).map((r) => [r.id, r.personalizedMessage])
+      );
+      setCandidates((prev) =>
+        prev.map((c) => {
+          const updatedMsg = serverMsgMap.get(c.id);
+          if (!updatedMsg) return c;
+          return {
+            ...c,
+            billingStatus: c.billingStatus === 'Pago no MP' ? 'Pago no MP' : 'Enviada',
+            billingSentAt: new Date().toISOString(),
+            billingChannel: 'Comunicado + Cobrança',
+            billingMessage: updatedMsg,
+          };
+        })
+      );
+
+      confetti({ particleCount: 75, spread: 70, origin: { y: 0.5 } });
+      setStatusNotice({
+        type: 'success',
+        text: `Comunicado oficial publicado no aplicativo e preparado para ${res.recipientsCount} assinante(s) em cobrança! Utilize os botões de WhatsApp, E-mail ou Copiar abaixo caso deseje reenviar individualmente.`,
+      });
+      await onBillingUpdated();
+    } catch (err: any) {
+      setStatusNotice({
+        type: 'error',
+        text: err.message || 'Não foi possível enviar o comunicado aos assinantes em cobrança.',
+      });
+    } finally {
+      setIsSendingNotice(false);
+    }
+  };
+
+  const handleCopyNoticeRecipient = async (recipient: NoticeDispatchRecipient) => {
+    try {
+      await navigator.clipboard.writeText(recipient.personalizedMessage);
+      setCopiedNoticeId(recipient.id);
+      setTimeout(() => setCopiedNoticeId(null), 2200);
+      await handleMarkDispatched(recipient.id, 'Link Copiado');
+    } catch {
+      // Ignore clipboard failure
     }
   };
 
@@ -1000,6 +1110,171 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
         </div>
       </div>
 
+      {/* Official Checkout Error & 6-Month Reduced Plan Notice Dispatcher */}
+      <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/10 via-white to-emerald-500/10 dark:from-amber-950/30 dark:via-slate-900 dark:to-emerald-950/20 border-2 border-amber-500/50 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="p-2 rounded-xl bg-amber-500 text-slate-950 shrink-0">
+                <Megaphone className="w-4 h-4" />
+              </div>
+              <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                Comunicado aos Assinantes em Cobrança (Erro Checkout Mercado Pago + Planos Reduzidos 6 Meses)
+              </h4>
+              {activeNoticeMeta && (
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                  Ativo no App • {pendingCandidates.length} em cobrança
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Informa automaticamente quem está recebendo cobrança em aberto que os pagamentos anteriores não foram compensados por erro técnico no checkout do Mercado Pago (já corrigido) e que todos os planos foram reduzidos por <strong>6 meses</strong>.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSendCheckoutRecoveryNotice}
+            disabled={isSendingNotice}
+            className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md transition cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+          >
+            {isSendingNotice ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Publicando Comunicado...</span>
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4" />
+                <span>Enviar Comunicado aos Assinantes em Cobrança ({pendingCandidates.length})</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-[11px]">
+          <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
+            Básico: <strong className="text-emerald-600 dark:text-emerald-400">R$ 25,00/mês</strong>
+          </span>
+          <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
+            Pro: <strong className="text-emerald-600 dark:text-emerald-400">R$ 29,90/mês</strong>
+          </span>
+          <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
+            Construtor: <strong className="text-emerald-600 dark:text-emerald-400">R$ 49,90/mês</strong>
+          </span>
+          <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
+            Anual Construtora: <strong className="text-emerald-600 dark:text-emerald-400">R$ 499,00/ano</strong>
+          </span>
+          <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-800 dark:text-amber-300 font-black">
+            Validade Promocional: 6 meses
+          </span>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
+            Texto do Comunicado (Personalizado com plano, valor reduzido e links de pagamento de cada assinante):
+          </label>
+          <textarea
+            rows={3}
+            value={noticeMessage}
+            onChange={(e) => setNoticeMessage(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
+          />
+        </div>
+
+        {/* Immediate per-subscriber quick dispatch cards for pending uncompensated subscribers */}
+        {(dispatchedRecipients.length > 0 || pendingCandidates.length > 0) && (
+          <div className="pt-2 border-t border-amber-500/20 space-y-2">
+            <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              Assinantes com Cobrança Não Compensada Prontos para Envio Direto ({dispatchedRecipients.length > 0 ? dispatchedRecipients.length : pendingCandidates.length}):
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {(dispatchedRecipients.length > 0
+                ? dispatchedRecipients
+                : pendingCandidates.map((p) => ({
+                    id: p.id,
+                    subscriberName: p.subscriberName,
+                    subscriberEmail: p.subscriberEmail,
+                    subscriberPhone: p.subscriberPhone,
+                    planType: p.planType,
+                    amount: p.amount,
+                    billingLink: p.billingLink,
+                    pixTicketUrl: p.pixTicketUrl,
+                    pixCopyPaste: p.pixCopyPaste,
+                    personalizedMessage: buildCheckoutRecoveryMessage(p, noticeMessage),
+                  }))
+              ).map((rec) => {
+                const waUrl = rec.subscriberPhone ? formatBrWhatsappUrl(rec.subscriberPhone, rec.personalizedMessage) : null;
+                const mailUrl = rec.subscriberEmail
+                  ? buildMailtoUrl(
+                      rec.subscriberEmail,
+                      rec.subscriberName,
+                      rec.planType,
+                      rec.amount,
+                      rec.personalizedMessage,
+                      true
+                    )
+                  : null;
+                return (
+                  <div
+                    key={`notice-rec-${rec.id}`}
+                    className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                        {rec.subscriberName}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                        {rec.planType} • R$ {Number(rec.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {rec.subscriberEmail ? ` • ${rec.subscriberEmail}` : ''}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      {waUrl && (
+                        <a
+                          href={waUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => handleMarkDispatched(rec.id, 'WhatsApp')}
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] inline-flex items-center gap-1 transition"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>WhatsApp</span>
+                        </a>
+                      )}
+                      {mailUrl && (
+                        <a
+                          href={mailUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => handleMarkDispatched(rec.id, 'Email')}
+                          className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-black text-[11px] inline-flex items-center gap-1 transition"
+                        >
+                          <Mail className="w-3.5 h-3.5" />
+                          <span>E-mail</span>
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleCopyNoticeRecipient(rec)}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition"
+                      >
+                        {copiedNoticeId === rec.id ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                        <span>{copiedNoticeId === rec.id ? 'Copiado!' : 'Copiar'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Subscribers Billing Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
@@ -1029,10 +1304,10 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             ) : (
               candidates.map((c) => {
                 const isSelected = selectedIds.has(c.id);
-                const hasCharge = Boolean(c.billingLink || c.pixCopyPaste);
+                const hasCharge = Boolean(c.billingLink || c.pixCopyPaste || c.billingMessage);
                 const msg =
                   c.billingMessage ||
-                  `Olá ${c.subscriberName}, segue sua cobrança Mãos em Obra (${c.planType} - R$ ${c.amount.toFixed(2)}): ${c.billingLink || ''}`;
+                  buildCheckoutRecoveryMessage(c, noticeMessage);
                 const waHref = hasCharge ? formatBrWhatsappUrl(c.subscriberPhone, msg) : null;
                 const mailHref = hasCharge ? buildMailtoUrl(c.subscriberEmail, c.subscriberName, c.planType, c.amount, msg) : null;
 
