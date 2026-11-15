@@ -24,10 +24,10 @@ import {
 } from 'lucide-react';
 import { LanguageSelector } from './LanguageSelector';
 
-export type NavTab = 'dashboard' | 'opportunities' | 'invitations' | 'requests' | 'rdo' | 'reports' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'notifications' | 'admin';
+export type NavTab = 'dashboard' | 'opportunities' | 'invitations' | 'requests' | 'rdo' | 'reports' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'notifications' | 'safety' | 'admin';
 export type UserAccessRole = 'admin' | 'subscriber_pro' | 'subscriber_paid' | 'free' | 'visitor';
 
-const SERVICE_TABS: NavTab[] = ['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team'];
+const SERVICE_TABS: NavTab[] = ['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team', 'safety'];
 
 interface NavigationProps {
   activeTab: NavTab;
@@ -106,6 +106,15 @@ export const Navigation: React.FC<NavigationProps> = ({
       highlight: true,
       badge: 'Automação 300+',
       badgeColor: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-black',
+    },
+    {
+      id: 'safety' as NavTab,
+      label: 'Segurança (PT & DDS)',
+      description: 'Permissões de Trabalho e Fichas de Diálogo Diário de Segurança',
+      icon: ShieldCheck,
+      highlight: true,
+      badge: 'NR-10/18/35',
+      badgeColor: 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black',
     },
     {
       id: 'opportunities' as NavTab,

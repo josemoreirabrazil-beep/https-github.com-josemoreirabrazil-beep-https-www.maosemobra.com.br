@@ -50,6 +50,7 @@ export interface DailyLog {
   photos: PhotoAttachment[];
   aiSummary?: string;
   driveDocId?: string;
+  reminderTime?: string;
   createdAt: string;
 }
 
@@ -225,6 +226,8 @@ export interface ServiceRequest {
   category: string;
   description: string;
   urgency: 'Normal' | 'Alta' | 'Urgente';
+  priority?: 'Baixa' | 'Normal' | 'Alta' | 'Urgente';
+  executionDueDate?: string;
   estimatedScope?: string;
   desiredStartDate?: string;
   photos?: string[];
@@ -778,4 +781,48 @@ export interface FiscalNfseSummary {
   pendingTransmissionCount?: number;
   rejectedTransmissionCount?: number;
 }
+
+export interface WorkPermitChecklistItem {
+  id: string;
+  label: string;
+  checked: boolean;
+}
+
+export interface WorkPermit {
+  id: string;
+  projectId: string;
+  permitNumber: string;
+  workType: 'Trabalho em Altura (NR-35)' | 'Trabalho a Quente (Solda/Corte - NR-18)' | 'Espaço Confinado (NR-33)' | 'Serviços Elétricos (NR-10)' | 'Içamento de Cargas' | 'Escavação / Movimentação de Terra' | 'Outros';
+  location: string;
+  date: string;
+  shift: 'Manhã' | 'Tarde' | 'Noite' | 'Integral (24h)';
+  supervisorName: string;
+  safetyTechnician: string;
+  riskChecklist: WorkPermitChecklistItem[];
+  ppeRequired: string[];
+  workersList: string[];
+  status: 'Pendente' | 'Liberada / Ativa' | 'Suspensa' | 'Encerrada';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface DdsAttendee {
+  name: string;
+  role: string;
+  signature: boolean;
+}
+
+export interface DdsRecord {
+  id: string;
+  projectId: string;
+  ddsNumber: string;
+  date: string;
+  topic: string;
+  speakerName: string;
+  location: string;
+  summary: string;
+  attendees: DdsAttendee[];
+  createdAt: string;
+}
+
 

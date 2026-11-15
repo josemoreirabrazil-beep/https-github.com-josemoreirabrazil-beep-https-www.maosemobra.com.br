@@ -242,6 +242,14 @@ export const TechnicalReportsView: React.FC<TechnicalReportsViewProps> = ({
     }
   };
 
+  const handleExportPdf = (doc: TechnicalDocument) => {
+    setPreviewDoc(doc);
+    confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+    setTimeout(() => {
+      window.print();
+    }, 350);
+  };
+
   const openNewDocumentModal = (presetType: TechnicalDocumentType = 'Laudo Técnico') => {
     if (isLaudoDocumentType(presetType) && !isProActive) {
       if (onOpenProUpgrade) {
@@ -883,6 +891,16 @@ export const TechnicalReportsView: React.FC<TechnicalReportsViewProps> = ({
 
                     <button
                       type="button"
+                      onClick={() => handleExportPdf(doc)}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                      title="Exportar laudo em PDF formatado para impressão profissional"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Exportar Laudo em PDF</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => handleDownloadHtml(doc)}
                       className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
                       title="Baixar documento formatado"
@@ -1362,11 +1380,19 @@ export const TechnicalReportsView: React.FC<TechnicalReportsViewProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleExportPdf(previewDoc)}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Exportar Laudo em PDF</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => window.print()}
-                  className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black flex items-center gap-1.5 cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span>Imprimir / Salvar PDF</span>
+                  <span>Imprimir</span>
                 </button>
                 <button
                   type="button"

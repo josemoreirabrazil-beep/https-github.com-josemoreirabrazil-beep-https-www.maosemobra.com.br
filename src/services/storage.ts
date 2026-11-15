@@ -1,4 +1,4 @@
-import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProposalQuote, ConstructionOpportunity, ServiceProviderProfile, CorporateContact, TechnicalDocument } from '../types';
+import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProposalQuote, ConstructionOpportunity, ServiceProviderProfile, CorporateContact, TechnicalDocument, WorkPermit, DdsRecord } from '../types';
 import { INITIAL_CORPORATE_CONTACTS } from '../data/corporateContacts';
 
 const STORAGE_KEYS = {
@@ -15,6 +15,8 @@ const STORAGE_KEYS = {
   PROVIDERS: 'maos_em_obra_providers',
   CORPORATE_CONTACTS: 'maos_em_obra_corporate_contacts_v2',
   TECH_DOCS: 'maos_em_obra_technical_documents_v1',
+  WORK_PERMITS: 'maos_em_obra_work_permits_v1',
+  DDS_RECORDS: 'maos_em_obra_dds_records_v1',
 };
 
 export const INITIAL_SERVICE_REQUESTS: ServiceRequest[] = [];
@@ -889,6 +891,66 @@ export function readAndResizeLogoFile(file: File, maxWidth = 420, maxHeight = 20
     reader.onerror = () => reject(new Error('Não foi possível ler o arquivo de logotipo.'));
     reader.readAsDataURL(file);
   });
+}
+
+export function loadWorkPermits(projectId?: string): WorkPermit[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.WORK_PERMITS);
+    const all: WorkPermit[] = raw ? JSON.parse(raw) : [];
+    if (projectId) {
+      return all.filter(p => p.projectId === projectId);
+    }
+    return all;
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveWorkPermits(projectIdOrPermits: string | WorkPermit[], maybePermits?: WorkPermit[]): void {
+  try {
+    if (typeof projectIdOrPermits === 'string') {
+      const projectId = projectIdOrPermits;
+      const permitsToSave = maybePermits || [];
+      const raw = localStorage.getItem(STORAGE_KEYS.WORK_PERMITS);
+      const all: WorkPermit[] = raw ? JSON.parse(raw) : [];
+      const other = all.filter(p => p.projectId !== projectId);
+      localStorage.setItem(STORAGE_KEYS.WORK_PERMITS, JSON.stringify([...permitsToSave, ...other]));
+    } else {
+      localStorage.setItem(STORAGE_KEYS.WORK_PERMITS, JSON.stringify(projectIdOrPermits));
+    }
+  } catch (e) {
+    console.error('Failed to save work permits:', e);
+  }
+}
+
+export function loadDdsRecords(projectId?: string): DdsRecord[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DDS_RECORDS);
+    const all: DdsRecord[] = raw ? JSON.parse(raw) : [];
+    if (projectId) {
+      return all.filter(d => d.projectId === projectId);
+    }
+    return all;
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveDdsRecords(projectIdOrRecords: string | DdsRecord[], maybeRecords?: DdsRecord[]): void {
+  try {
+    if (typeof projectIdOrRecords === 'string') {
+      const projectId = projectIdOrRecords;
+      const recordsToSave = maybeRecords || [];
+      const raw = localStorage.getItem(STORAGE_KEYS.DDS_RECORDS);
+      const all: DdsRecord[] = raw ? JSON.parse(raw) : [];
+      const other = all.filter(d => d.projectId !== projectId);
+      localStorage.setItem(STORAGE_KEYS.DDS_RECORDS, JSON.stringify([...recordsToSave, ...other]));
+    } else {
+      localStorage.setItem(STORAGE_KEYS.DDS_RECORDS, JSON.stringify(projectIdOrRecords));
+    }
+  } catch (e) {
+    console.error('Failed to save DDS records:', e);
+  }
 }
 
 

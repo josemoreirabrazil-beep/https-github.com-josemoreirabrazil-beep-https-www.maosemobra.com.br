@@ -13,6 +13,7 @@ import { OpportunitiesView } from './components/OpportunitiesView';
 import { BatchInvitationsView } from './components/BatchInvitationsView';
 import { TechnicalReportsView } from './components/TechnicalReportsView';
 import { NotificationSettingsView } from './components/NotificationSettingsView';
+import { SafetyWorkPermitAndDdsView } from './components/SafetyWorkPermitAndDdsView';
 import { AdminMasterView } from './components/AdminMasterView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
@@ -970,6 +971,12 @@ export default function App() {
             onSaveMember={handleSaveTeamMember}
             onDeleteMember={handleDeleteTeamMember}
             initialCategoryFilter={teamCategoryFilter}
+          />
+        )}
+
+        {activeTab === 'safety' && canAccessServices && (
+          <SafetyWorkPermitAndDdsView
+            project={currentProject}
           />
         )}
 

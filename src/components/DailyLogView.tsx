@@ -74,6 +74,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({
   const [activePhotoModal, setActivePhotoModal] = useState<PhotoAttachment | null>(null);
   const [newPhotoUrl, setNewPhotoUrl] = useState('');
   const [newPhotoCaption, setNewPhotoCaption] = useState('');
+  const [reminderTime, setReminderTime] = useState('17:00');
 
   const resetForm = () => {
     setDate(new Date().toISOString().split('T')[0]);
@@ -88,6 +89,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({
     setNotes('');
     setPhotos([]);
     setAiSummary('');
+    setReminderTime('17:00');
     setIsCreating(false);
     setEditingRdoId(null);
   };
@@ -102,6 +104,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({
     setNotes(rdo.notes || '');
     setPhotos(rdo.photos || []);
     setAiSummary(rdo.aiSummary || '');
+    setReminderTime(rdo.reminderTime || '17:00');
     setIsCreating(true);
   };
 
@@ -159,6 +162,23 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({
       setPhotos(prev => [...prev, photo]);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleTestBrowserNotification = async () => {
+    if (!('Notification' in window)) {
+      alert('Seu navegador não suporta notificações nativas.');
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      new Notification('Mãos em Obra - Lembrete RDO', {
+        body: `Lembrete agendado para ${reminderTime}. Hora de revisar ou preencher o Diário de Obra do projeto "${project.title}".`,
+        icon: '/favicon.ico',
+      });
+      alert(`Permissão concedida! Notificação de teste disparada para o horário ${reminderTime}.`);
+    } else {
+      alert('Permissão de notificações negada pelo navegador.');
+    }
   };
 
   const handleGenerateAiSummary = async () => {
@@ -264,6 +284,7 @@ ${rdoToSave.aiSummary}
       notes: notes.trim(),
       photos,
       aiSummary,
+      reminderTime,
       createdAt: new Date().toISOString(),
     };
 
@@ -362,6 +383,36 @@ ${rdoToSave.aiSummary}
                     <span className="mt-1 truncate max-w-full">{w.split(' ')[0]}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Reminder Time & Browser Notifications Integration */}
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-300">
+                  Horário para Lembrete Diário (Notificação Push)
+                </label>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                  Defina o horário em que o navegador deve lembrar você de concluir ou preencher o Diário de Obra de hoje.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={reminderTime}
+                  onChange={(e) => setReminderTime(e.target.value)}
+                  className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white"
+                />
+                <button
+                  type="button"
+                  onClick={handleTestBrowserNotification}
+                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition cursor-pointer whitespace-nowrap"
+                >
+                  Testar Lembrete
+                </button>
               </div>
             </div>
           </div>

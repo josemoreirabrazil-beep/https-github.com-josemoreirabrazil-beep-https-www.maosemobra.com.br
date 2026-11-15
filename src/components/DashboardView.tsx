@@ -42,6 +42,7 @@ import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
 import { ProjectGoals } from './ProjectGoals';
 import { ProjectStatusSummary } from './ProjectStatusSummary';
+import { ExpenseCategoryDonutChart } from './ExpenseCategoryDonutChart';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import {
   fetchSubscribersCashflow,
@@ -1339,6 +1340,9 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
         phases={phases}
         onNavigateToTimeline={() => onNavigate('timeline')}
       />
+
+      {/* 🍩 Gráfico de Rosca: Distribuição de Gastos por Categoria */}
+      <ExpenseCategoryDonutChart expenses={expenses} />
 
       {/* 🍱 Flagship Bento Grid (Main Showcase) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">

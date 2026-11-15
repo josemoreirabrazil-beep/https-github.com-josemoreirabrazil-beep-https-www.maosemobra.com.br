@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   ClipboardList, 
   Send, 
@@ -79,6 +79,9 @@ export const ServiceRequestsView: React.FC<ServiceRequestsViewProps> = ({
   const [category, setCategory] = useState('Reformas & Acabamentos');
   const [description, setDescription] = useState('');
   const [urgency, setUrgency] = useState<'Normal' | 'Alta' | 'Urgente'>('Normal');
+  const [priority, setPriority] = useState<'Baixa' | 'Normal' | 'Alta' | 'Urgente'>('Normal');
+  const [executionDueDate, setExecutionDueDate] = useState('');
+  const [sortBy, setSortBy] = useState<'urgency' | 'due_date' | 'recent'>('urgency');
   const [estimatedScope, setEstimatedScope] = useState('');
   const [desiredStartDate, setDesiredStartDate] = useState('');
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
@@ -126,6 +129,8 @@ export const ServiceRequestsView: React.FC<ServiceRequestsViewProps> = ({
       category,
       description,
       urgency,
+      priority,
+      executionDueDate,
       estimatedScope,
       desiredStartDate: desiredStartDate || new Date().toISOString().split('T')[0],
       status: 'Pendente de Orçamento',
@@ -152,14 +157,35 @@ export const ServiceRequestsView: React.FC<ServiceRequestsViewProps> = ({
     setIsQuoteModalOpen(true);
   };
 
-  // Filter requests
-  const filteredRequests = serviceRequests.filter(req => {
-    if (filterStatus !== 'all' && req.status !== filterStatus) return false;
-    if (filterCity !== 'all' && !req.city.toLowerCase().includes(filterCity.toLowerCase())) return false;
-    if (filterLocationType === 'out_of_town' && !req.isOutOfTown) return false;
-    if (filterLocationType === 'in_town' && req.isOutOfTown) return false;
-    return true;
-  });
+  // Filter and sort requests
+  const filteredRequests = useMemo(() => {
+    const list = serviceRequests.filter(req => {
+      if (filterStatus !== 'all' && req.status !== filterStatus) return false;
+      if (filterCity !== 'all' && !req.city.toLowerCase().includes(filterCity.toLowerCase())) return false;
+      if (filterLocationType === 'out_of_town' && !req.isOutOfTown) return false;
+      if (filterLocationType === 'in_town' && req.isOutOfTown) return false;
+      return true;
+    });
+
+    return list.sort((a, b) => {
+      if (sortBy === 'urgency') {
+        const rank = (p?: string, u?: string) => {
+          const val = p || u || 'Normal';
+          if (val === 'Urgente') return 4;
+          if (val === 'Alta') return 3;
+          if (val === 'Normal') return 2;
+          return 1;
+        };
+        return rank(b.priority, b.urgency) - rank(a.priority, a.urgency);
+      } else if (sortBy === 'due_date') {
+        const dateA = a.executionDueDate ? new Date(a.executionDueDate).getTime() : Infinity;
+        const dateB = b.executionDueDate ? new Date(b.executionDueDate).getTime() : Infinity;
+        return dateA - dateB;
+      } else {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+    });
+  }, [serviceRequests, filterStatus, filterCity, filterLocationType, sortBy]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -274,6 +300,17 @@ export const ServiceRequestsView: React.FC<ServiceRequestsViewProps> = ({
                 <option value="Orçado pelo Profissional">Orçado pelo Profissional</option>
                 <option value="Aprovado pelo Solicitante">Aprovado</option>
               </select>
+
+              {/* Sort By selector */}
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="px-3 py-1.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200"
+              >
+                <option value="urgency">Ordenar por Urgência / Prioridade</option>
+                <option value="due_date">Ordenar por Data Limite</option>
+                <option value="recent">Mais Recentes</option>
+              </select>
             </div>
 
             <button
@@ -329,6 +366,23 @@ export const ServiceRequestsView: React.FC<ServiceRequestsViewProps> = ({
                           {req.urgency === 'Urgente' && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/20 text-rose-600 dark:text-rose-400">
                               Urgente
+                            </span>
+                          )}
+
+                          {req.priority && (
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                              req.priority === 'Urgente' ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' :
+                              req.priority === 'Alta' ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400' :
+                              'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                            }`}>
+                              Prioridade: {req.priority}
+                            </span>
+                          )}
+
+                          {req.executionDueDate && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                              <Calendar className="w-3 h-3 text-amber-500" />
+                              <span>Limite: {new Date(req.executionDueDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
                             </span>
                           )}
                         </div>
@@ -546,6 +600,37 @@ export const ServiceRequestsView: React.FC<ServiceRequestsViewProps> = ({
                   <option value="Alta">Alta (Início nos próximos 7 dias)</option>
                   <option value="Urgente">Urgente (Imediato / Emergencial)</option>
                 </select>
+              </div>
+            </div>
+
+            {/* Priority & Execution Due Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Prioridade
+                </label>
+                <select
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as any)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium"
+                >
+                  <option value="Baixa">Baixa</option>
+                  <option value="Normal">Normal</option>
+                  <option value="Alta">Alta</option>
+                  <option value="Urgente">Urgente</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Data Limite de Execução
+                </label>
+                <input
+                  type="date"
+                  value={executionDueDate}
+                  onChange={(e) => setExecutionDueDate(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-medium"
+                />
               </div>
             </div>
 

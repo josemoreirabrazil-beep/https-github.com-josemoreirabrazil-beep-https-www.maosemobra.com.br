@@ -43,6 +43,8 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+
+
   // Template state
   const templates = [
     {
@@ -127,6 +129,22 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
       return matchRegion && matchStatus && matchSearch;
     });
   }, [contacts, selectedRegion, selectedStatus, searchTerm]);
+
+  // Pagination state for 800+ contacts visibility
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number | 'all'>(100);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedRegion, selectedStatus, searchTerm]);
+
+  const paginatedContacts = useMemo(() => {
+    if (itemsPerPage === 'all') return filteredContacts;
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredContacts.slice(start, start + itemsPerPage);
+  }, [filteredContacts, currentPage, itemsPerPage]);
+
+  const totalPages = itemsPerPage === 'all' ? 1 : Math.ceil(filteredContacts.length / itemsPerPage);
 
   // Statistics
   const stats = useMemo(() => {
@@ -706,8 +724,55 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
         </div>
 
         <div className="font-medium">
-          Exibindo <strong>{filteredContacts.length}</strong> de {contacts.length} empresas
+          Exibindo <strong>{paginatedContacts.length}</strong> de {filteredContacts.length} (Total geral: {contacts.length} empresas cadastradas)
         </div>
+      </div>
+
+      {/* Pagination & Items Per Page Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3.5 rounded-2xl text-xs shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-slate-400 font-bold">Empresas visíveis por página:</span>
+          {([50, 100, 250, 500, 'all'] as const).map((opt) => (
+            <button
+              key={String(opt)}
+              onClick={() => {
+                setItemsPerPage(opt);
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+                itemsPerPage === opt
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                  : opt === 'all'
+                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+              }`}
+            >
+              {opt === 'all' ? 'Ver Todos (800+)' : opt}
+            </button>
+          ))}
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold disabled:opacity-40 cursor-pointer"
+            >
+              Anterior
+            </button>
+            <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+              Página {currentPage} de {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold disabled:opacity-40 cursor-pointer"
+            >
+              Próxima
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ======================================================== */}
@@ -722,7 +787,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredContacts.map((contact) => {
+            {paginatedContacts.map((contact) => {
               const isSelected = selectedIds.has(contact.id);
               const isSent = contact.status === 'Enviado' || contact.status === 'Respondido';
 
