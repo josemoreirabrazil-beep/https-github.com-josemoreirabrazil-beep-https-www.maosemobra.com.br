@@ -1,4 +1,4 @@
-import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProposalQuote, ConstructionOpportunity, ServiceProviderProfile, CorporateContact } from '../types';
+import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProposalQuote, ConstructionOpportunity, ServiceProviderProfile, CorporateContact, TechnicalDocument } from '../types';
 import { INITIAL_CORPORATE_CONTACTS } from '../data/corporateContacts';
 
 const STORAGE_KEYS = {
@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   OPPORTUNITIES: 'maos_em_obra_opportunities',
   PROVIDERS: 'maos_em_obra_providers',
   CORPORATE_CONTACTS: 'maos_em_obra_corporate_contacts_v2',
+  TECH_DOCS: 'maos_em_obra_technical_documents_v1',
 };
 
 export const INITIAL_SERVICE_REQUESTS: ServiceRequest[] = [];
@@ -815,6 +816,76 @@ export function updateCorporateContactStatus(
   saveCorporateContacts(updated);
   return updated;
 }
+
+export function loadTechnicalDocuments(projectId?: string): TechnicalDocument[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.TECH_DOCS);
+    const allDocs: TechnicalDocument[] = raw ? JSON.parse(raw) : [];
+    if (projectId) {
+      return allDocs.filter(doc => doc.projectId === projectId);
+    }
+    return allDocs;
+  } catch (e) {
+    console.error('Failed to load technical documents:', e);
+    return [];
+  }
+}
+
+export function saveTechnicalDocuments(projectIdOrDocs: string | TechnicalDocument[], maybeDocs?: TechnicalDocument[]): void {
+  try {
+    if (typeof projectIdOrDocs === 'string') {
+      const projectId = projectIdOrDocs;
+      const docsToSave = maybeDocs || [];
+      const raw = localStorage.getItem(STORAGE_KEYS.TECH_DOCS);
+      const allDocs: TechnicalDocument[] = raw ? JSON.parse(raw) : [];
+      const otherDocs = allDocs.filter(doc => doc.projectId !== projectId);
+      localStorage.setItem(STORAGE_KEYS.TECH_DOCS, JSON.stringify([...docsToSave, ...otherDocs]));
+    } else {
+      localStorage.setItem(STORAGE_KEYS.TECH_DOCS, JSON.stringify(projectIdOrDocs));
+    }
+  } catch (e) {
+    console.error('Failed to save technical documents:', e);
+  }
+}
+
+export function readAndResizeLogoFile(file: File, maxWidth = 420, maxHeight = 200): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      if (file.type === 'image/svg+xml') {
+        resolve(result);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(result);
+          return;
+        }
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => resolve(result);
+      img.src = result;
+    };
+    reader.onerror = () => reject(new Error('Não foi possível ler o arquivo de logotipo.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 
 
 

@@ -11,13 +11,15 @@ import { TeamSuppliersView } from './components/TeamSuppliersView';
 import { ServiceRequestsView } from './components/ServiceRequestsView';
 import { OpportunitiesView } from './components/OpportunitiesView';
 import { BatchInvitationsView } from './components/BatchInvitationsView';
+import { TechnicalReportsView } from './components/TechnicalReportsView';
 import { AdminMasterView } from './components/AdminMasterView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
 import { ProjectModal } from './components/ProjectModal';
 import { InstallAppModal } from './components/InstallAppModal';
 import { WithdrawalModal } from './components/WithdrawalModal';
-import { Download, CheckCircle2, X, Megaphone, ExternalLink } from 'lucide-react';
+import { MercadoPagoModal } from './components/MercadoPagoModal';
+import { Download, CheckCircle2, X, Megaphone, ExternalLink, Lock, Briefcase, Sparkles } from 'lucide-react';
 import { 
   parseMercadoPagoRedirectParams, 
   processMercadoPagoRedirectReturn, 
@@ -38,12 +40,23 @@ import {
   loadServiceRequests, 
   saveServiceRequests,
   loadGoals,
-  saveGoals
+  saveGoals,
+  loadTechnicalDocuments,
+  saveTechnicalDocuments
 } from './services/storage';
 import { subscribeToAuthChanges, googleSignIn, getCachedGoogleToken } from './services/firebaseAuth';
 import { getCachedAdminSession, clearAdminSession } from './services/adminAuth';
+import {
+  getActiveUserSubscription,
+  setActiveUserSubscription,
+  hasPaidServiceAccess,
+  hasProLaudoAccess,
+  syncEnrolledSubscriberToServer,
+  SUBSCRIPTION_UPDATED_EVENT,
+  type ActiveSubscriptionState
+} from './services/subscriberBilling';
 import { usePushNotifications } from './hooks/usePushNotifications';
-import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser, ProjectGoal } from './types';
+import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser, ProjectGoal, TechnicalDocument } from './types';
 import confetti from 'canvas-confetti';
 
 export default function App() {
@@ -76,6 +89,7 @@ export default function App() {
   const [team, setTeam] = useState<TeamMember[]>(() => getTeamMembers());
   const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>(() => loadServiceRequests());
   const [goals, setGoals] = useState<ProjectGoal[]>(() => loadGoals(currentProject.id));
+  const [techDocs, setTechDocs] = useState<TechnicalDocument[]>(() => loadTechnicalDocuments(currentProject.id));
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
@@ -97,6 +111,35 @@ export default function App() {
   // Admin Master Global State
   const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
   const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
+
+  // Active Subscription Plan State (Free tier = view opportunities only; Pro = Laudo emission)
+  const [activeSubscription, setActiveSubscription] = useState<ActiveSubscriptionState>(() => getActiveUserSubscription());
+  const [isProUpgradeModalOpen, setIsProUpgradeModalOpen] = useState(false);
+  const [upgradeModalMode, setUpgradeModalMode] = useState<'pro-laudo' | 'choose-plan'>('choose-plan');
+
+  const canAccessServices = hasPaidServiceAccess(activeSubscription) || Boolean(adminUser);
+  const serviceTabSet = new Set<NavTab>(['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team', 'invitations']);
+  const isLockedServiceTab = serviceTabSet.has(activeTab) && !canAccessServices;
+
+  const openChoosePlanModal = () => {
+    setUpgradeModalMode('choose-plan');
+    setIsProUpgradeModalOpen(true);
+  };
+
+  const openProLaudoModal = () => {
+    setUpgradeModalMode('pro-laudo');
+    setIsProUpgradeModalOpen(true);
+  };
+
+  useEffect(() => {
+    const syncSub = () => setActiveSubscription(getActiveUserSubscription());
+    window.addEventListener(SUBSCRIPTION_UPDATED_EVENT, syncSub);
+    window.addEventListener('storage', syncSub);
+    return () => {
+      window.removeEventListener(SUBSCRIPTION_UPDATED_EVENT, syncSub);
+      window.removeEventListener('storage', syncSub);
+    };
+  }, []);
 
   // Listen to Firebase Auth
   useEffect(() => {
@@ -136,12 +179,49 @@ export default function App() {
     setExpenses(getExpenses(currentProject.id));
     setPhases(getPhases(currentProject.id));
     setGoals(loadGoals(currentProject.id));
+    setTechDocs(loadTechnicalDocuments(currentProject.id));
   }, [currentProjectId]);
 
   // 🔔 1. Processamento Automático do Retorno do Mercado Pago via URL / Redirecionamento
   useEffect(() => {
     const mpRedirect = parseMercadoPagoRedirectParams();
     if (mpRedirect) {
+      const refLower = String(mpRedirect.ref || mpRedirect.externalReference || '').toLowerCase();
+      const statusLower = String(mpRedirect.mpStatus || mpRedirect.status || mpRedirect.collectionStatus || '').toLowerCase();
+      const searchLower = typeof window !== 'undefined' ? window.location.search.toLowerCase() : '';
+      if (statusLower === 'approved' || statusLower === 'authorized') {
+        let matchedSub: {
+          planId: string;
+          planCode: string;
+          planName: string;
+          price: number;
+          billingCycle: 'Mensal' | 'Anual';
+          role: string;
+        } | null = null;
+        if (refLower.includes('anual') || refLower.includes('annual') || refLower.includes('plan-005') || searchLower.includes('subscription=annual')) {
+          matchedSub = { planId: 'plan-005', planCode: 'Anual Construtor', planName: 'Anual Construtor', price: 499.00, billingCycle: 'Anual', role: 'Construtora / Empreiteiro' };
+        } else if (refLower.includes('pro') || refLower.includes('plan-001')) {
+          matchedSub = { planId: 'plan-001', planCode: 'Mensal Pro', planName: 'Mensal Pro', price: 29.90, billingCycle: 'Mensal', role: 'Técnico / Projetista' };
+        } else if (refLower.includes('construtor') || refLower.includes('plan-002')) {
+          matchedSub = { planId: 'plan-002', planCode: 'Mensal Construtor', planName: 'Mensal Construtor', price: 49.90, billingCycle: 'Mensal', role: 'Construtora / Empreiteiro' };
+        } else if (refLower.includes('basico') || refLower.includes('básico') || refLower.includes('plan-003')) {
+          matchedSub = { planId: 'plan-003', planCode: 'Mensal Básico', planName: 'Mensal Básico', price: 25.00, billingCycle: 'Mensal', role: 'Prestador de Serviço' };
+        }
+        if (matchedSub) {
+          const updated = setActiveUserSubscription(matchedSub);
+          setActiveSubscription(updated);
+          syncEnrolledSubscriberToServer({
+            subscriberName: user?.displayName || currentProject.clientName || `Assinante ${matchedSub.planName}`,
+            subscriberEmail: user?.email || currentProject.clientEmail || '',
+            subscriberRole: matchedSub.role,
+            planType: matchedSub.planCode,
+            amount: matchedSub.price,
+            method: 'Mercado Pago',
+            mpVerifiedStatus: 'approved',
+          });
+        }
+      }
+
       processMercadoPagoRedirectReturn(mpRedirect, {
         currentProjectId: currentProject.id,
         expenses,
@@ -256,12 +336,14 @@ export default function App() {
 
   // Handlers for Project CRUD
   const handleSaveProject = (projectData: Partial<Project>) => {
+    const targetId = projectData.id || currentProject.id;
     let updatedProjects: Project[];
-    if (projects.some(p => p.id === projectData.id)) {
-      updatedProjects = projects.map(p => p.id === projectData.id ? { ...p, ...projectData } as Project : p);
+    if (projects.some(p => p.id === targetId)) {
+      updatedProjects = projects.map(p => p.id === targetId ? { ...p, ...projectData, id: targetId } as Project : p);
     } else {
-      updatedProjects = [projectData as Project, ...projects];
-      setCurrentProjectId(projectData.id!);
+      const baseProject = targetId === currentProject.id ? { ...currentProject, ...projectData, id: targetId } : projectData;
+      updatedProjects = [baseProject as Project, ...projects];
+      setCurrentProjectId(targetId);
       confetti({ particleCount: 50, spread: 60 });
     }
     setProjects(updatedProjects);
@@ -396,6 +478,21 @@ export default function App() {
     saveGoals(currentProject.id, updated);
   };
 
+  // Handlers for Technical Documents (Laudos & ARTs)
+  const handleSaveTechDoc = (doc: TechnicalDocument) => {
+    const updated = techDocs.some(d => d.id === doc.id)
+      ? techDocs.map(d => (d.id === doc.id ? doc : d))
+      : [doc, ...techDocs];
+    setTechDocs(updated);
+    saveTechnicalDocuments(currentProject.id, updated);
+  };
+
+  const handleDeleteTechDoc = (docId: string) => {
+    const updated = techDocs.filter(d => d.id !== docId);
+    setTechDocs(updated);
+    saveTechnicalDocuments(currentProject.id, updated);
+  };
+
   const handleRequireAuth = async () => {
     try {
       await googleSignIn();
@@ -434,7 +531,9 @@ export default function App() {
         rdoCount={rdos.length}
         unpaidExpensesCount={expenses.filter(e => e.status !== 'Pago').length}
         requestsCount={serviceRequests.filter(r => r.status === 'Pendente de Orçamento').length}
+        techDocsCount={techDocs.length}
         isAdminAuthenticated={!!adminUser}
+        hasServiceAccess={canAccessServices}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
       />
@@ -539,15 +638,60 @@ export default function App() {
             onUpdateProject={handleSaveProject}
             isAuthenticated={isAuthenticated}
             adminUser={adminUser}
+            activeSubscription={activeSubscription}
             onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
           />
         )}
         
         {activeTab === 'opportunities' && (
-          <OpportunitiesView />
+          <OpportunitiesView
+            hasServiceAccess={canAccessServices}
+            onRequirePaidPlan={openChoosePlanModal}
+          />
         )}
 
-        {activeTab === 'invitations' && (
+        {isLockedServiceTab && (
+          <div className="max-w-3xl mx-auto my-6 p-6 sm:p-8 rounded-3xl bg-white dark:bg-slate-900 border-2 border-amber-500/40 shadow-xl space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 shadow-md">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-black uppercase tracking-wider">
+                  Cadastro Gratuito Ativo (R$ 0,00)
+                </span>
+                <h2 className="text-xl font-black text-slate-900 dark:text-white">
+                  Acesso aos Serviços Disponível Apenas nos Planos Pagos
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Os cadastros gratuitos dão acesso <strong>apenas à visualização das oportunidades de obras</strong>. Para acessar serviços operacionais — como <strong>ART &amp; Laudos, Solicitações &amp; Logística, RDO, Orçamento &amp; Custos, Cronograma, Calculadora IA, Google Drive e Equipe</strong> — escolha um plano mensal (a partir de R$ 25,00/mês) ou o plano anual para Construtoras, Empreiteiras e Incorporadoras (R$ 499,00/ano).
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => handleTabChange('opportunities')}
+                className="w-full py-3 px-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <Briefcase className="w-4 h-4 text-emerald-500" />
+                <span>Visualizar Oportunidades (Gratuito)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={openChoosePlanModal}
+                className="w-full py-3 px-4 rounded-2xl bg-[#009ee3] hover:bg-[#0082ba] text-white text-xs font-black flex items-center justify-center gap-2 shadow-md transition cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Escolher Plano Pago (Mensal ou Anual)</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'invitations' && canAccessServices && (
           <BatchInvitationsView
             onNavigateToOpportunities={() => setActiveTab('opportunities')}
           />
@@ -567,7 +711,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'requests' && (
+        {activeTab === 'requests' && canAccessServices && (
           <ServiceRequestsView
             currentProject={currentProject}
             serviceRequests={serviceRequests}
@@ -580,7 +724,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'rdo' && (
+        {activeTab === 'rdo' && canAccessServices && (
           <DailyLogView
             project={currentProject}
             rdos={rdos}
@@ -591,7 +735,20 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'financial' && (
+        {activeTab === 'reports' && canAccessServices && (
+          <TechnicalReportsView
+            project={currentProject}
+            documents={techDocs}
+            onSaveDocument={handleSaveTechDoc}
+            onDeleteDocument={handleDeleteTechDoc}
+            onUpdateProject={handleSaveProject}
+            hasProAccess={hasProLaudoAccess(activeSubscription)}
+            activePlanName={activeSubscription.planName}
+            onOpenProUpgrade={openProLaudoModal}
+          />
+        )}
+
+        {activeTab === 'financial' && canAccessServices && (
           <FinancialView
             project={currentProject}
             expenses={expenses}
@@ -605,7 +762,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'timeline' && (
+        {activeTab === 'timeline' && canAccessServices && (
           <TimelineView
             phases={phases}
             onUpdatePhase={handleUpdatePhase}
@@ -614,13 +771,13 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'calculator' && (
+        {activeTab === 'calculator' && canAccessServices && (
           <CalculatorAndAIView
             project={currentProject}
           />
         )}
 
-        {activeTab === 'drive' && (
+        {activeTab === 'drive' && canAccessServices && (
           <DriveExplorerView
             project={currentProject}
             rdos={rdos}
@@ -632,7 +789,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'team' && (
+        {activeTab === 'team' && canAccessServices && (
           <TeamSuppliersView
             team={team}
             onSaveMember={handleSaveTeamMember}
@@ -709,6 +866,90 @@ export default function App() {
         isOpen={isWithdrawalModalOpen}
         onClose={() => setIsWithdrawalModalOpen(false)}
         availableAmount={1834.80}
+      />
+
+      {/* Checkout Mercado Pago para Seleção de Planos (Mensal, Anual Construtoras ou Pro) */}
+      <MercadoPagoModal
+        isOpen={isProUpgradeModalOpen}
+        onClose={() => setIsProUpgradeModalOpen(false)}
+        title={
+          upgradeModalMode === 'pro-laudo'
+            ? `Plano Mensal Pro — Emissão de Laudos (${currentProject.title})`
+            : `Escolher Plano Pago — ${currentProject.title}`
+        }
+        amount={upgradeModalMode === 'pro-laudo' ? 29.90 : 0}
+        selectedPlanId={upgradeModalMode === 'pro-laudo' ? 'plan-001' : undefined}
+        requirePlanSelection={upgradeModalMode === 'choose-plan'}
+        description={
+          upgradeModalMode === 'pro-laudo'
+            ? 'Assinatura Mensal Recorrente Plano Pro (R$ 29,90/mês) — Libera emissão de Laudos Técnicos e Vistorias'
+            : 'Escolha um plano mensal (R$ 25,00, R$ 29,90, R$ 49,90) ou o Plano Anual Construtor (R$ 499,00/ano) para liberar todos os serviços'
+        }
+        payerName={currentProject.clientName || 'Assinante Mãos em Obra'}
+        payerEmail={currentProject.clientEmail || 'cliente@maosemobra.com.br'}
+        referenceId={`SUB-${upgradeModalMode === 'pro-laudo' ? 'PRO' : 'PLAN'}-${currentProject.id}-${Date.now()}`}
+        onPaymentSuccess={(paymentInfo) => {
+          const nameLower = (paymentInfo.planName || '').toLowerCase();
+          let chosen: {
+            planId: string;
+            planCode: string;
+            planName: string;
+            price: number;
+            billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
+          } = {
+            planId: 'plan-004',
+            planCode: 'Gratuito Lançamento',
+            planName: 'Cadastro Gratuito',
+            price: 0,
+            billingCycle: 'Gratuito',
+          };
+          if (nameLower.includes('anual') || Math.abs(paymentInfo.amount - 499.00) < 0.5 || paymentInfo.amount >= 400) {
+            chosen = {
+              planId: 'plan-005',
+              planCode: 'Anual Construtor',
+              planName: 'Anual Construtor',
+              price: 499.00,
+              billingCycle: 'Anual',
+            };
+          } else if (Math.abs(paymentInfo.amount - 29.90) < 0.05 || nameLower.includes('pro')) {
+            chosen = {
+              planId: 'plan-001',
+              planCode: 'Mensal Pro',
+              planName: 'Mensal Pro',
+              price: 29.90,
+              billingCycle: 'Mensal',
+            };
+          } else if (Math.abs(paymentInfo.amount - 49.90) < 0.05 || nameLower.includes('construtor')) {
+            chosen = {
+              planId: 'plan-002',
+              planCode: 'Mensal Construtor',
+              planName: 'Mensal Construtor',
+              price: 49.90,
+              billingCycle: 'Mensal',
+            };
+          } else if (Math.abs(paymentInfo.amount - 25.00) < 0.05 || nameLower.includes('básico')) {
+            chosen = {
+              planId: 'plan-003',
+              planCode: 'Mensal Básico',
+              planName: 'Mensal Básico',
+              price: 25.00,
+              billingCycle: 'Mensal',
+            };
+          }
+          const updated = setActiveUserSubscription(chosen);
+          setActiveSubscription(updated);
+          syncEnrolledSubscriberToServer({
+            subscriberName: user?.displayName || currentProject.clientName || 'Assinante Mãos em Obra',
+            subscriberEmail: user?.email || currentProject.clientEmail || '',
+            subscriberRole: chosen.planCode.includes('Construtor') ? 'Construtora / Empreiteiro' : 'Técnico / Projetista',
+            planType: chosen.planCode,
+            amount: chosen.price,
+            method: paymentInfo.method === 'pix' ? 'PIX' : 'Mercado Pago',
+            transactionId: paymentInfo.paymentId,
+            mpPaymentId: paymentInfo.paymentId,
+            mpVerifiedStatus: chosen.price > 0 ? 'approved' : undefined,
+          });
+        }}
       />
 
     </div>

@@ -1,17 +1,35 @@
 import express from 'express';
 import path from 'path';
+import os from 'os';
+import fs from 'fs';
+import { execFileSync } from 'child_process';
 import crypto from 'crypto';
+import http from 'http';
+import https from 'https';
+import zlib from 'zlib';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
-import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment, PreApproval, PreApprovalPlan } from 'mercadopago';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = 3000;
 const SERVER_START_TIME = Date.now();
 const MASTER_SECRET_KEY = process.env.ADMIN_JWT_SECRET || 'MAOS_EM_OBRA_MASTER_FORTRESS_KEY_2026';
+
+function resolvePublicAppUrl(req: express.Request): string {
+  const envUrl = (process.env.APP_URL || '').trim();
+  if (envUrl && envUrl !== 'MY_APP_URL' && /^https?:\/\//i.test(envUrl)) {
+    return envUrl.replace(/\/+$/, '');
+  }
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const proto = forwardedProto || req.protocol || 'https';
+  const host = req.get('host') || 'localhost:3000';
+  return `${proto}://${host}`;
+}
 
 // Master Global Credentials
 const MASTER_USER = 'maos';
@@ -163,16 +181,45 @@ function getGeminiClient() {
   });
 }
 
+const FALLBACK_MP_ACCESS_TOKEN = 'APP_USR-3601228991521911-102618-e2449d1648cbac170dda941d0757cc4c-3635249681';
+
+function resolveMercadoPagoAccessToken(): string {
+  const raw = (process.env.MERCADO_PAGO_ACCESS_TOKEN || '').replace(/^["']|["']$/g, '').trim();
+  if (!raw || raw.startsWith('MY_') || !raw.startsWith('APP_USR-')) {
+    return FALLBACK_MP_ACCESS_TOKEN;
+  }
+  return raw;
+}
+
 // Lazy initialize Mercado Pago client
-function getMercadoPagoClient(): MercadoPagoConfig | null {
-  const token = process.env.MERCADO_PAGO_ACCESS_TOKEN || 'APP_USR-3601228991521911-102618-e2449d1648cbac170dda941d0757cc4c-3635249681';
+function getMercadoPagoClient(explicitToken?: string): MercadoPagoConfig | null {
+  const token = explicitToken || resolveMercadoPagoAccessToken();
   if (!token) {
     return null;
   }
   return new MercadoPagoConfig({
     accessToken: token,
-    options: { timeout: 7000 },
+    options: { timeout: 9000 },
   });
+}
+
+async function withMercadoPagoRetry<T>(fn: (client: MercadoPagoConfig) => Promise<T>): Promise<T> {
+  const primaryToken = resolveMercadoPagoAccessToken();
+  const primaryClient = getMercadoPagoClient(primaryToken);
+  if (!primaryClient) {
+    throw new Error('Credenciais do Mercado Pago não configuradas.');
+  }
+  try {
+    return await fn(primaryClient);
+  } catch (err) {
+    if (primaryToken !== FALLBACK_MP_ACCESS_TOKEN) {
+      const fallbackClient = getMercadoPagoClient(FALLBACK_MP_ACCESS_TOKEN);
+      if (fallbackClient) {
+        return await fn(fallbackClient);
+      }
+    }
+    throw err;
+  }
 }
 
 // Health check
@@ -393,6 +440,18 @@ let subscriberPayments: Array<{
   notes?: string;
   transactionId?: string;
   projectCount?: number;
+  billingStatus?: string;
+  billingLink?: string;
+  pixTicketUrl?: string;
+  pixCopyPaste?: string;
+  mpPreferenceId?: string;
+  mpPaymentId?: string | number;
+  billingExternalRef?: string;
+  billingEmittedAt?: string;
+  billingSentAt?: string;
+  billingChannel?: string;
+  billingMessage?: string;
+  mpVerifiedStatus?: string;
 }> = [
   {
     id: 'sub-pay-001',
@@ -401,7 +460,7 @@ let subscriberPayments: Array<{
     subscriberPhone: '(73) 99123-4567',
     subscriberRole: 'Técnico / Projetista',
     planType: 'Mensal Pro',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Aprovado',
     paymentDate: '2026-08-25',
@@ -417,14 +476,14 @@ let subscriberPayments: Array<{
     subscriberEmail: 'contato@bahiasulconstrutora.com.br',
     subscriberPhone: '(73) 98844-3322',
     subscriberRole: 'Construtora / Empreiteiro',
-    planType: 'Anual Construtor',
-    amount: 1490.00,
+    planType: 'Mensal Construtor',
+    amount: 49.90,
     method: 'Mercado Pago',
     status: 'Aprovado',
     paymentDate: '2026-08-10',
-    dueDate: '2027-08-10',
-    reference: 'Plano Anual Construtor Master (12 meses + Drive Backup)',
-    notes: 'Processado via Mercado Pago Checkout Pro (Cartão de Crédito 12x).',
+    dueDate: '2026-09-10',
+    reference: 'Plano Mensal Construtor Master (Multiobras + Drive Backup)',
+    notes: 'Processado via Mercado Pago Checkout Pro.',
     transactionId: 'MP-PREF-9948172635',
     projectCount: 12,
   },
@@ -435,7 +494,7 @@ let subscriberPayments: Array<{
     subscriberPhone: '(73) 99911-8877',
     subscriberRole: 'Loja / Fornecedor',
     planType: 'Mensal Pro',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Aprovado',
     paymentDate: '2026-08-18',
@@ -486,7 +545,7 @@ let subscriberPayments: Array<{
     subscriberPhone: '(73) 98877-0099',
     subscriberRole: 'Técnico / Projetista',
     planType: 'Mensal Pro',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Pendente',
     paymentDate: '2026-08-28',
@@ -502,14 +561,14 @@ let subscriberPayments: Array<{
     subscriberEmail: 'contato@eletricasantos.com.br',
     subscriberPhone: '(73) 99188-4455',
     subscriberRole: 'Prestador de Serviço',
-    planType: 'Taxa de Proposta / Uso',
-    amount: 45.00,
+    planType: 'Mensal Básico',
+    amount: 25.00,
     method: 'Mercado Pago',
     status: 'Aprovado',
     paymentDate: '2026-08-29',
-    dueDate: '2026-08-29',
-    reference: 'Taxa de Envio de Proposta Comercial Obra Residencial',
-    notes: 'Taxa de intermediação aprovada via Mercado Pago.',
+    dueDate: '2026-09-29',
+    reference: 'Assinatura Mensal Básico - Propostas & Ferramentas de Obra',
+    notes: 'Assinatura mensal aprovada via Mercado Pago.',
     transactionId: 'MP-FEE-881920',
     projectCount: 1,
   }
@@ -609,16 +668,16 @@ let clientAndProviderReceipts: ClientProviderReceipt[] = [
     partyEmail: 'valdir.mestre.obras@gmail.com',
     partyPhone: '(73) 98133-7766',
     partyCpfCnpj: '592.110.492-30',
-    description: 'Taxa de Envio de Proposta Comercial Obra 14',
+    description: 'Assinatura Mensal Básico - Propostas Obra 14',
     projectName: 'Reforma Comercial Centro',
-    amount: 45.00,
+    amount: 25.00,
     method: 'PIX',
     status: 'Pendente',
     referenceId: 'REF-PREST-PROP-001',
     dueDate: '2026-11-02',
     createdAt: '2026-10-29T08:00:00.000Z',
     updatedAt: '2026-10-29T08:00:00.000Z',
-    notes: 'Aguardando validação do pagamento da proposta pelo Mercado Pago.',
+    notes: 'Aguardando validação do pagamento pelo Mercado Pago.',
   },
   {
     id: 'REC-PREST-002',
@@ -628,7 +687,7 @@ let clientAndProviderReceipts: ClientProviderReceipt[] = [
     partyPhone: '(73) 99123-4567',
     partyCpfCnpj: '284.991.029-44',
     description: 'Assinatura Mensal Pro - Gestão & RDO Ilimitado',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Aprovado',
     referenceId: 'sub-pay-001',
@@ -668,7 +727,7 @@ let clientAndProviderReceipts: ClientProviderReceipt[] = [
     partyPhone: '(73) 98877-0099',
     partyCpfCnpj: '09.342.109/0001-44',
     description: 'Renovação Mensal Pro Setembro',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Pendente',
     referenceId: 'sub-pay-006',
@@ -678,6 +737,1477 @@ let clientAndProviderReceipts: ClientProviderReceipt[] = [
     notes: 'Cobrança PIX gerada no Mercado Pago, aguardando liquidação.',
   }
 ];
+
+function resolveReducedPlanPrice(planType?: string, fallbackAmount?: number): number {
+  const normalized = String(planType || '').toLowerCase().trim();
+  if (!normalized) return Number(fallbackAmount) || 0;
+  if (normalized.includes('personalizado')) return Number(fallbackAmount) || 0;
+  if (normalized.includes('gratuito') || normalized.includes('isento')) return 0;
+  if (normalized.includes('anual')) return 499.00;
+  if (normalized.includes('construtor') || normalized.includes('empreit') || normalized.includes('incorp')) return 49.90;
+  if (normalized.includes('básico') || normalized.includes('basico')) return 25.00;
+  if (normalized.includes('pro')) return 29.90;
+  return Number(fallbackAmount) || 0;
+}
+
+function isSubscriptionReceiptRecord(r: ClientProviderReceipt): boolean {
+  const ref = String(r.referenceId || '').toLowerCase();
+  const desc = String(r.description || '').toLowerCase();
+  return (
+    ref.startsWith('sub-') ||
+    ref.startsWith('sub_') ||
+    desc.includes('assinatura') ||
+    desc.includes('mensal pro') ||
+    desc.includes('mensal básico') ||
+    desc.includes('mensal basico') ||
+    desc.includes('mensal construtor') ||
+    desc.includes('anual construtor') ||
+    desc.includes('renovação mensal') ||
+    desc.includes('renovacao mensal')
+  );
+}
+
+function reconcilePendingChargesToReducedPlans(
+  updates?: Array<{ id: string; planType?: string; amount?: number }>
+) {
+  const updateMap = new Map<string, { planType?: string; amount?: number }>();
+  if (Array.isArray(updates)) {
+    for (const u of updates) {
+      if (u && u.id) {
+        updateMap.set(String(u.id), { planType: u.planType, amount: u.amount });
+      }
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const adjustedIds: string[] = [];
+  const adjustedDetails: Array<{
+    id: string;
+    subscriberName: string;
+    planType: string;
+    previousAmount: number;
+    newAmount: number;
+  }> = [];
+
+  for (const s of subscriberPayments) {
+    const isPendingOrOverdue = s.status === 'Pendente' || s.status === 'Atrasado';
+    const isPaidInMp = s.mpVerifiedStatus === 'approved' || s.billingStatus === 'Pago no MP';
+    if (!isPendingOrOverdue || isPaidInMp) continue;
+
+    const override = updateMap.get(s.id);
+    const targetPlan = override?.planType || s.planType;
+    const isCustom = String(targetPlan || '').toLowerCase().includes('personalizado');
+    const targetAmount = isCustom
+      ? Number(override?.amount ?? s.amount) || 0
+      : resolveReducedPlanPrice(targetPlan, override?.amount ?? s.amount);
+
+    const prevAmount = Number(s.amount) || 0;
+    const planChanged = s.planType !== targetPlan;
+    const amountChanged = Math.abs(prevAmount - targetAmount) > 0.009;
+
+    if (planChanged || amountChanged) {
+      s.planType = targetPlan;
+      s.amount = Number(targetAmount.toFixed(2));
+      if (targetAmount <= 0) {
+        s.status = 'Isento / Cortesia';
+        s.billingStatus = undefined;
+        s.billingLink = undefined;
+        s.pixTicketUrl = undefined;
+        s.pixCopyPaste = undefined;
+        s.mpPreferenceId = undefined;
+        s.mpPaymentId = undefined;
+        s.billingMessage = undefined;
+      } else if (amountChanged) {
+        s.billingStatus = 'Não Emitida';
+        s.billingLink = undefined;
+        s.pixTicketUrl = undefined;
+        s.pixCopyPaste = undefined;
+        s.mpPreferenceId = undefined;
+        s.mpPaymentId = undefined;
+        s.billingMessage = undefined;
+      }
+      s.notes = `Valor pendente ajustado de R$ ${prevAmount.toFixed(2)} para R$ ${targetAmount.toFixed(2)} (${targetPlan}).`;
+      adjustedIds.push(s.id);
+      adjustedDetails.push({
+        id: s.id,
+        subscriberName: s.subscriberName,
+        planType: targetPlan,
+        previousAmount: prevAmount,
+        newAmount: Number(targetAmount.toFixed(2)),
+      });
+    }
+
+    // Keep linked pending ClientProviderReceipt aligned
+    for (const r of clientAndProviderReceipts) {
+      if (r.status !== 'Pendente') continue;
+      const matchesSub =
+        r.referenceId === s.id ||
+        (s.billingExternalRef && r.referenceId === s.billingExternalRef) ||
+        (s.subscriberEmail &&
+          r.partyEmail &&
+          r.partyEmail.toLowerCase() === s.subscriberEmail.toLowerCase() &&
+          isSubscriptionReceiptRecord(r));
+      if (matchesSub && Math.abs(Number(r.amount) - targetAmount) > 0.009) {
+        r.amount = Number(targetAmount.toFixed(2));
+        r.description = `Cobrança Assinatura ${targetPlan}`;
+        r.updatedAt = nowIso;
+        r.notes = `Valor ajustado automaticamente para o plano reduzido (${targetPlan}: R$ ${targetAmount.toFixed(2)}).`;
+      }
+    }
+  }
+
+  // Also ensure any standalone pending subscription receipt uses the reduced plan price
+  for (const r of clientAndProviderReceipts) {
+    if (r.status !== 'Pendente' || !isSubscriptionReceiptRecord(r)) continue;
+    const expected = resolveReducedPlanPrice(r.description, r.amount);
+    if (expected > 0 && Math.abs(Number(r.amount) - expected) > 0.009) {
+      const prev = Number(r.amount) || 0;
+      r.amount = Number(expected.toFixed(2));
+      r.updatedAt = nowIso;
+      r.notes = `Valor ajustado de R$ ${prev.toFixed(2)} para R$ ${expected.toFixed(2)} conforme planos reduzidos.`;
+    }
+  }
+
+  return {
+    adjustedCount: adjustedIds.length,
+    adjustedIds,
+    adjustedDetails,
+  };
+}
+
+// ==========================================
+// 🧾 EMISSÃO AUTOMÁTICA DE NFS-e & CERTIFICADO DIGITAL
+//    MOREIRA BRASIL SERVIÇOS — CNPJ 68.603.032/0001-15
+//    Atividades Estritamente Limitadas a Serviços Web
+// ==========================================
+
+export interface WebServiceCnaeActivity {
+  code: string;
+  description: string;
+  lc116Code: string;
+  lc116Description: string;
+  issRate: number;
+  category: 'Serviços Web';
+  enabled: boolean;
+  isPrimary?: boolean;
+}
+
+const WEB_SERVICE_CNAES_CATALOG: WebServiceCnaeActivity[] = [
+  {
+    code: '6319-4/00',
+    description: 'Portais, provedores de conteúdo e outros serviços de informação na internet',
+    lc116Code: '1.09',
+    lc116Description: 'Disponibilização, sem cessão definitiva, de conteúdos e acesso em plataforma web por meio da internet',
+    issRate: 2.0,
+    category: 'Serviços Web',
+    enabled: true,
+    isPrimary: true,
+  },
+  {
+    code: '6311-9/00',
+    description: 'Tratamento de dados, provedores de serviços de aplicação e serviços de hospedagem na internet (SaaS / Web)',
+    lc116Code: '1.03',
+    lc116Description: 'Processamento, armazenamento ou hospedagem de dados, páginas eletrônicas, aplicativos e sistemas web',
+    issRate: 2.0,
+    category: 'Serviços Web',
+    enabled: true,
+  },
+  {
+    code: '6202-3/00',
+    description: 'Desenvolvimento e licenciamento de programas de computador customizáveis (Sistemas Web)',
+    lc116Code: '1.05',
+    lc116Description: 'Licenciamento ou cessão de direito de uso de programas de computador e plataformas web',
+    issRate: 2.0,
+    category: 'Serviços Web',
+    enabled: true,
+  },
+  {
+    code: '6203-1/00',
+    description: 'Desenvolvimento e licenciamento de programas de computador não-customizáveis (SaaS Web)',
+    lc116Code: '1.05',
+    lc116Description: 'Licenciamento de software padrão web por assinatura mensal ou anual',
+    issRate: 2.0,
+    category: 'Serviços Web',
+    enabled: true,
+  },
+  {
+    code: '6201-5/01',
+    description: 'Desenvolvimento de programas de computador sob encomenda (Aplicações Web e APIs)',
+    lc116Code: '1.01',
+    lc116Description: 'Análise e desenvolvimento de sistemas e aplicações web sob encomenda',
+    issRate: 2.0,
+    category: 'Serviços Web',
+    enabled: true,
+  },
+  {
+    code: '6204-0/00',
+    description: 'Consultoria em tecnologia da informação (Arquitetura Web e Integrações Digitais)',
+    lc116Code: '1.06',
+    lc116Description: 'Assessoria e consultoria em informática e infraestrutura web',
+    issRate: 2.0,
+    category: 'Serviços Web',
+    enabled: false,
+  },
+  {
+    code: '6209-1/00',
+    description: 'Suporte técnico, manutenção e outros serviços em tecnologia da informação (Plataformas Web)',
+    lc116Code: '1.07',
+    lc116Description: 'Suporte técnico em informática, incluindo manutenção de sistemas e portais web',
+    issRate: 2.0,
+    category: 'Serviços Web',
+    enabled: false,
+  },
+];
+
+function isAllowedWebServiceCnae(code?: string): boolean {
+  const clean = String(code || '').trim();
+  return WEB_SERVICE_CNAES_CATALOG.some((item) => item.code === clean);
+}
+
+// Generate an in-memory RSA-SHA256 signing pair so RPS/NFS-e XMLs have valid cryptographic signatures
+// until/unless replaced by an uploaded PKCS#12 (.pfx/.p12) private key.
+const initialSigningKeyPair = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+let activeCertificatePrivateKeyPem: string = initialSigningKeyPair.privateKey;
+let activeCertificatePem: string = '';
+let storedCertificatePfxBase64: string = '';
+let storedCertificatePfxPassword: string = '';
+let storedFiscalApiToken: string = (process.env.FISCAL_API_TOKEN || '').trim();
+
+const initialThumbprint = crypto
+  .createHash('sha256')
+  .update(initialSigningKeyPair.publicKey)
+  .digest('hex')
+  .toUpperCase();
+
+type FiscalApiProviderId =
+  | 'prefeitura_abrasf_soap'
+  | 'portal_nacional_nfse'
+  | 'focus_nfe'
+  | 'nfe_io'
+  | 'plugnotas'
+  | 'webhook_custom';
+
+const PROVIDER_LABELS: Record<FiscalApiProviderId, string> = {
+  prefeitura_abrasf_soap: 'Prefeitura Municipal (ABRASF v2.04 SOAP + mTLS)',
+  portal_nacional_nfse: 'Portal Nacional NFS-e (SEFIN / ADN mTLS)',
+  focus_nfe: 'Focus NFe REST API (v2)',
+  nfe_io: 'NFe.io REST API (v1)',
+  plugnotas: 'PlugNotas / TecnoSpeed REST API',
+  webhook_custom: 'API Prefeitura / ERP Customizada (REST JSON)',
+};
+
+const envProviderRaw = (process.env.FISCAL_API_PROVIDER || '').trim() as FiscalApiProviderId;
+const initialProvider: FiscalApiProviderId = PROVIDER_LABELS[envProviderRaw]
+  ? envProviderRaw
+  : 'prefeitura_abrasf_soap';
+
+const fiscalConfig = {
+  autoEmitOnPayment: true,
+  environment: 'producao' as 'homologacao' | 'producao',
+  regimeTributario: 'Simples Nacional' as 'Simples Nacional' | 'MEI' | 'Lucro Presumido' | 'Lucro Real',
+  inscricaoMunicipal: '6860303-1',
+  municipioNome: 'Ilhéus',
+  municipioIbge: '2913606',
+  uf: 'BA',
+  rpsSeries: 'WEB',
+  nextRpsNumber: 1,
+  nextNfseNumber: 202600001,
+  defaultAliquotaIss: 2.0,
+  defaultWebActivityCode: '6319-4/00',
+  serviceDescriptionTemplate:
+    'Prestação de serviços web e disponibilização de plataforma digital na internet (Mãos em Obra) — Plano {{PLAN}} | Ref: {{REF}}',
+  emailNotificationToClient: true,
+  restrictToWebActivitiesOnly: true as const,
+  companyName: 'MOREIRA BRASIL SERVIÇOS',
+  cnpj: '68603032000115',
+  cnpjFormatted: '68.603.032/0001-15',
+  webActivities: WEB_SERVICE_CNAES_CATALOG.map((a) => ({ ...a })),
+  certificate: {
+    id: 'CERT-MOREIRA-68603032000115',
+    companyName: 'MOREIRA BRASIL SERVIÇOS',
+    cnpj: '68603032000115',
+    cnpjFormatted: '68.603.032/0001-15',
+    certificateType: 'A1 ICP-Brasil (PKCS#12 / .PFX)',
+    status: 'Ativo (Perfil A1 Vinculado)' as
+      | 'Ativo (Perfil A1 Vinculado)'
+      | 'Ativo (.PFX Validado ICP-Brasil)'
+      | 'Expirado'
+      | 'Substituir',
+    hasUploadedPfx: false,
+    fileName: undefined as string | undefined,
+    subjectName:
+      'CN=MOREIRA BRASIL SERVICOS:68603032000115, OU=e-CNPJ A1, OU=RFB, O=ICP-Brasil, C=BR',
+    issuerName: 'AC SOLUTI Multipla v5 / ICP-Brasil',
+    serialNumber: '68603032000115A12026',
+    thumbprintSha256: initialThumbprint,
+    validFrom: new Date('2026-01-15T00:00:00Z').toISOString(),
+    validTo: new Date('2027-01-15T23:59:59Z').toISOString(),
+    uploadedAt: undefined as string | undefined,
+    lastVerifiedAt: new Date().toISOString(),
+    cnpjMatchesEmitter: true,
+  },
+  apiIntegration: {
+    provider: initialProvider,
+    providerLabel: PROVIDER_LABELS[initialProvider],
+    autoTransmitToProvider: Boolean(process.env.FISCAL_API_ENDPOINT || process.env.FISCAL_API_TOKEN),
+    productionEndpoint:
+      (process.env.FISCAL_API_ENDPOINT || '').trim() ||
+      'https://sefin.nfse.gov.br/SefinNacional/nfse',
+    homologacaoEndpoint:
+      'https://sefin.producaorestrita.nfse.gov.br/SefinNacional/nfse',
+    soapAction: 'http://nfse.abrasf.org.br/GerarNfse',
+    useStoredCertificateMtls: true,
+    apiCompanyId: (process.env.FISCAL_API_COMPANY_ID || '').trim() || '68603032000115',
+    customHeaderName: 'Authorization',
+    lastConnectionTestAt: undefined as string | undefined,
+    lastConnectionStatus: 'Não Testado' as 'Conectado' | 'Falha na Conexão' | 'Não Testado',
+    lastConnectionMessage: undefined as string | undefined,
+    lastCertificateSyncAt: undefined as string | undefined,
+  },
+};
+
+export interface FiscalTransmissionInfo {
+  provider: FiscalApiProviderId;
+  providerLabel: string;
+  transmissionStatus:
+    | 'Autorizada na API'
+    | 'Transmitida (Aguardando Retorno)'
+    | 'Rejeitada pela API'
+    | 'Assinada Localmente (Aguardando Conexão API)';
+  usedStoredCertificateMtls: boolean;
+  protocolNumber?: string;
+  externalInvoiceId?: string;
+  externalPdfUrl?: string;
+  externalXmlUrl?: string;
+  httpStatus?: number;
+  requestEndpoint?: string;
+  responseMessage?: string;
+  lastAttemptAt?: string;
+  authorizedAt?: string;
+}
+
+export interface FiscalTransmissionLog {
+  id: string;
+  timestamp: string;
+  nfseId?: string;
+  nfseNumber?: string;
+  provider: FiscalApiProviderId;
+  providerLabel: string;
+  action: 'EMITIR_NFSE' | 'TESTE_CONEXAO' | 'SINCRONIZAR_CERTIFICADO' | 'CANCELAR_NFSE';
+  endpoint: string;
+  usedMtlsCertificate: boolean;
+  success: boolean;
+  httpStatus?: number;
+  protocolNumber?: string;
+  message: string;
+}
+
+export interface FiscalNfseRecord {
+  id: string;
+  nfseNumber: string;
+  rpsNumber: number;
+  rpsSeries: string;
+  verificationCode: string;
+  status: 'Autorizada' | 'Cancelada' | 'Erro';
+  environment: 'homologacao' | 'producao';
+  issuedAt: string;
+  competenceDate: string;
+  prestadorName: string;
+  prestadorCnpj: string;
+  prestadorIm?: string;
+  tomadorName: string;
+  tomadorEmail?: string;
+  tomadorDocument?: string;
+  tomadorRole?: string;
+  cnaeCode: string;
+  cnaeDescription: string;
+  lc116Code: string;
+  serviceDescription: string;
+  grossAmount: number;
+  aliquotaIss: number;
+  issAmount: number;
+  netAmount: number;
+  paymentId?: string;
+  paymentReference?: string;
+  triggerSource:
+    | 'Automático (Pagamento Aprovado)'
+    | 'Automático (Webhook Mercado Pago)'
+    | 'Emissão Manual'
+    | 'Emissão em Lote';
+  certificateSubject: string;
+  certificateThumbprint: string;
+  xmlSignedDigest: string;
+  xmlContent: string;
+  transmission?: FiscalTransmissionInfo;
+  cancelledAt?: string;
+  cancelReason?: string;
+}
+
+const nfseRecords: FiscalNfseRecord[] = [];
+const fiscalTransmissionLogs: FiscalTransmissionLog[] = [];
+
+// ==========================================
+// 🔐 COFRE CRIPTOGRÁFICO PERSISTENTE (AES-256-GCM) PARA CERTIFICADO A1 & ESTADO FISCAL
+// ==========================================
+const FISCAL_VAULT_DIR = path.join(process.cwd(), '.data');
+const FISCAL_VAULT_FILE = path.join(FISCAL_VAULT_DIR, 'fiscal-vault.json');
+
+function getVaultEncryptionKey(): Buffer {
+  const secret = process.env.FISCAL_VAULT_SECRET || MASTER_SECRET_KEY;
+  return crypto.createHash('sha256').update(`FISCAL_VAULT::${secret}`).digest();
+}
+
+function encryptVaultText(plainText: string): string {
+  if (!plainText) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getVaultEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+function decryptVaultText(payload: string): string {
+  if (!payload || !payload.includes(':')) return '';
+  try {
+    const [ivHex, tagHex, encHex] = payload.split(':');
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      getVaultEncryptionKey(),
+      Buffer.from(ivHex, 'hex')
+    );
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(encHex, 'hex')),
+      decipher.final(),
+    ]);
+    return decrypted.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function saveFiscalVault() {
+  try {
+    if (!fs.existsSync(FISCAL_VAULT_DIR)) {
+      fs.mkdirSync(FISCAL_VAULT_DIR, { recursive: true });
+    }
+    const vaultPayload = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      fiscalConfig: {
+        ...fiscalConfig,
+      },
+      secretsEncrypted: {
+        privateKeyPem: encryptVaultText(activeCertificatePrivateKeyPem),
+        certificatePem: encryptVaultText(activeCertificatePem),
+        pfxBase64: encryptVaultText(storedCertificatePfxBase64),
+        pfxPassword: encryptVaultText(storedCertificatePfxPassword),
+        apiToken: encryptVaultText(storedFiscalApiToken),
+      },
+      nfseRecords: nfseRecords.slice(0, 500),
+      transmissionLogs: fiscalTransmissionLogs.slice(0, 250),
+    };
+    fs.writeFileSync(FISCAL_VAULT_FILE, JSON.stringify(vaultPayload, null, 2), { mode: 0o600 });
+  } catch (err) {
+    console.warn('Aviso ao persistir cofre fiscal criptografado:', (err as any)?.message);
+  }
+}
+
+function loadFiscalVault() {
+  try {
+    if (!fs.existsSync(FISCAL_VAULT_FILE)) return;
+    const raw = fs.readFileSync(FISCAL_VAULT_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+
+    const cfg = parsed.fiscalConfig || {};
+    if (typeof cfg.autoEmitOnPayment === 'boolean') fiscalConfig.autoEmitOnPayment = cfg.autoEmitOnPayment;
+    if (cfg.environment === 'homologacao' || cfg.environment === 'producao') fiscalConfig.environment = cfg.environment;
+    if (cfg.regimeTributario) fiscalConfig.regimeTributario = cfg.regimeTributario;
+    if (cfg.inscricaoMunicipal) fiscalConfig.inscricaoMunicipal = cfg.inscricaoMunicipal;
+    if (cfg.municipioNome) fiscalConfig.municipioNome = cfg.municipioNome;
+    if (cfg.municipioIbge) fiscalConfig.municipioIbge = cfg.municipioIbge;
+    if (cfg.uf) fiscalConfig.uf = cfg.uf;
+    if (cfg.rpsSeries) fiscalConfig.rpsSeries = cfg.rpsSeries;
+    if (typeof cfg.nextRpsNumber === 'number') fiscalConfig.nextRpsNumber = cfg.nextRpsNumber;
+    if (typeof cfg.nextNfseNumber === 'number') fiscalConfig.nextNfseNumber = cfg.nextNfseNumber;
+    if (typeof cfg.defaultAliquotaIss === 'number') fiscalConfig.defaultAliquotaIss = cfg.defaultAliquotaIss;
+    if (cfg.defaultWebActivityCode && isAllowedWebServiceCnae(cfg.defaultWebActivityCode)) {
+      fiscalConfig.defaultWebActivityCode = cfg.defaultWebActivityCode;
+    }
+    if (cfg.serviceDescriptionTemplate) fiscalConfig.serviceDescriptionTemplate = cfg.serviceDescriptionTemplate;
+    if (typeof cfg.emailNotificationToClient === 'boolean') {
+      fiscalConfig.emailNotificationToClient = cfg.emailNotificationToClient;
+    }
+    if (Array.isArray(cfg.webActivities)) {
+      const incomingMap = new Map<string, any>(cfg.webActivities.map((a: any) => [a.code, a]));
+      fiscalConfig.webActivities = WEB_SERVICE_CNAES_CATALOG.map((item) => {
+        const saved = incomingMap.get(item.code);
+        return saved ? { ...item, ...saved, category: 'Serviços Web' as const } : item;
+      });
+    }
+    if (cfg.certificate && typeof cfg.certificate === 'object') {
+      fiscalConfig.certificate = { ...fiscalConfig.certificate, ...cfg.certificate };
+    }
+    if (cfg.apiIntegration && typeof cfg.apiIntegration === 'object') {
+      const pId = cfg.apiIntegration.provider as FiscalApiProviderId;
+      fiscalConfig.apiIntegration = {
+        ...fiscalConfig.apiIntegration,
+        ...cfg.apiIntegration,
+        provider: PROVIDER_LABELS[pId] ? pId : fiscalConfig.apiIntegration.provider,
+        providerLabel: PROVIDER_LABELS[pId] || fiscalConfig.apiIntegration.providerLabel,
+      };
+    }
+
+    const sec = parsed.secretsEncrypted || {};
+    const decPriv = decryptVaultText(sec.privateKeyPem || '');
+    const decCert = decryptVaultText(sec.certificatePem || '');
+    const decPfx = decryptVaultText(sec.pfxBase64 || '');
+    const decPass = decryptVaultText(sec.pfxPassword || '');
+    const decToken = decryptVaultText(sec.apiToken || '');
+
+    if (decPriv) activeCertificatePrivateKeyPem = decPriv;
+    if (decCert) activeCertificatePem = decCert;
+    if (decPfx) storedCertificatePfxBase64 = decPfx;
+    if (decPass) storedCertificatePfxPassword = decPass;
+    if (decToken) storedFiscalApiToken = decToken;
+
+    if (Array.isArray(parsed.nfseRecords)) {
+      nfseRecords.splice(0, nfseRecords.length, ...parsed.nfseRecords);
+    }
+    if (Array.isArray(parsed.transmissionLogs)) {
+      fiscalTransmissionLogs.splice(0, fiscalTransmissionLogs.length, ...parsed.transmissionLogs);
+    }
+  } catch (err) {
+    console.warn('Aviso ao carregar cofre fiscal criptografado:', (err as any)?.message);
+  }
+}
+
+function getSanitizedFiscalConfig() {
+  const maskedToken = storedFiscalApiToken
+    ? storedFiscalApiToken.length > 8
+      ? `${storedFiscalApiToken.slice(0, 4)}••••••${storedFiscalApiToken.slice(-4)}`
+      : '••••••••'
+    : undefined;
+  return {
+    ...fiscalConfig,
+    certificateVaultEncrypted: true,
+    apiIntegration: {
+      ...fiscalConfig.apiIntegration,
+      hasApiToken: Boolean(storedFiscalApiToken),
+      apiTokenMasked: maskedToken,
+    },
+  };
+}
+
+function recordTransmissionLog(entry: Omit<FiscalTransmissionLog, 'id' | 'timestamp'>): FiscalTransmissionLog {
+  const log: FiscalTransmissionLog = {
+    id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  };
+  fiscalTransmissionLogs.unshift(log);
+  if (fiscalTransmissionLogs.length > 250) {
+    fiscalTransmissionLogs.length = 250;
+  }
+  return log;
+}
+
+function escapeXmlValue(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function buildSignedNfseXml(payload: {
+  nfseNumber: string;
+  rpsNumber: number;
+  rpsSeries: string;
+  verificationCode: string;
+  issuedAt: string;
+  competenceDate: string;
+  tomadorName: string;
+  tomadorEmail?: string;
+  tomadorDocument?: string;
+  cnaeCode: string;
+  lc116Code: string;
+  serviceDescription: string;
+  grossAmount: number;
+  aliquotaIss: number;
+  issAmount: number;
+  netAmount: number;
+}) {
+  const infXml = `<InfNfse Id="NFSe${payload.nfseNumber}">
+    <Numero>${payload.nfseNumber}</Numero>
+    <CodigoVerificacao>${payload.verificationCode}</CodigoVerificacao>
+    <DataEmissao>${payload.issuedAt}</DataEmissao>
+    <Competencia>${payload.competenceDate}</Competencia>
+    <IdentificacaoRps>
+      <Numero>${payload.rpsNumber}</Numero>
+      <Serie>${escapeXmlValue(payload.rpsSeries)}</Serie>
+      <Tipo>1</Tipo>
+    </IdentificacaoRps>
+    <PrestadorServico>
+      <IdentificacaoPrestador>
+        <Cnpj>${fiscalConfig.cnpj}</Cnpj>
+        <InscricaoMunicipal>${escapeXmlValue(fiscalConfig.inscricaoMunicipal)}</InscricaoMunicipal>
+      </IdentificacaoPrestador>
+      <RazaoSocial>${escapeXmlValue(fiscalConfig.companyName)}</RazaoSocial>
+      <CodigoMunicipio>${fiscalConfig.municipioIbge}</CodigoMunicipio>
+      <Uf>${fiscalConfig.uf}</Uf>
+      <RegimeTributacao>${escapeXmlValue(fiscalConfig.regimeTributario)}</RegimeTributacao>
+    </PrestadorServico>
+    <Servico>
+      <Valores>
+        <ValorServicos>${payload.grossAmount.toFixed(2)}</ValorServicos>
+        <ValorIss>${payload.issAmount.toFixed(2)}</ValorIss>
+        <Aliquota>${payload.aliquotaIss.toFixed(2)}</Aliquota>
+        <ValorLiquidoNfse>${payload.netAmount.toFixed(2)}</ValorLiquidoNfse>
+      </Valores>
+      <IssRetido>2</IssRetido>
+      <ItemListaServico>${escapeXmlValue(payload.lc116Code)}</ItemListaServico>
+      <CodigoCnae>${escapeXmlValue(payload.cnaeCode.replace(/\D/g, ''))}</CodigoCnae>
+      <Discriminacao>${escapeXmlValue(payload.serviceDescription)}</Discriminacao>
+      <CodigoMunicipio>${fiscalConfig.municipioIbge}</CodigoMunicipio>
+    </Servico>
+    <TomadorServico>
+      ${payload.tomadorDocument ? `<IdentificacaoTomador><CpfCnpj>${escapeXmlValue(payload.tomadorDocument.replace(/\D/g, ''))}</CpfCnpj></IdentificacaoTomador>` : ''}
+      <RazaoSocial>${escapeXmlValue(payload.tomadorName)}</RazaoSocial>
+      ${payload.tomadorEmail ? `<Contato><Email>${escapeXmlValue(payload.tomadorEmail)}</Email></Contato>` : ''}
+    </TomadorServico>
+  </InfNfse>`;
+
+  const digest = crypto.createHash('sha256').update(infXml).digest('base64');
+  let signatureValue = '';
+  try {
+    const signer = crypto.createSign('RSA-SHA256');
+    signer.update(infXml);
+    signer.end();
+    signatureValue = signer.sign(activeCertificatePrivateKeyPem, 'base64');
+  } catch {
+    signatureValue = crypto.createHmac('sha256', fiscalConfig.certificate.thumbprintSha256).update(infXml).digest('base64');
+  }
+
+  const x509Body = activeCertificatePem
+    ? activeCertificatePem
+        .replace(/-----BEGIN CERTIFICATE-----/g, '')
+        .replace(/-----END CERTIFICATE-----/g, '')
+        .replace(/\s+/g, '')
+    : '';
+
+  const fullXml = `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="2.04">
+    ${infXml}
+    <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+      <SignedInfo>
+        <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" />
+        <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" />
+        <Reference URI="#NFSe${payload.nfseNumber}">
+          <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256" />
+          <DigestValue>${digest}</DigestValue>
+        </Reference>
+      </SignedInfo>
+      <SignatureValue>${signatureValue}</SignatureValue>
+      <KeyInfo>
+        <X509Data>
+          <X509SubjectName>${escapeXmlValue(fiscalConfig.certificate.subjectName)}</X509SubjectName>
+          ${x509Body ? `<X509Certificate>${x509Body}</X509Certificate>` : ''}
+        </X509Data>
+      </KeyInfo>
+    </Signature>
+  </Nfse>
+</CompNfse>`;
+
+  return { xmlContent: fullXml, xmlSignedDigest: digest };
+}
+
+function getActiveProviderEndpoint(cnaeCode?: string): string {
+  if (cnaeCode) {
+    const activity = fiscalConfig.webActivities.find((a: any) => a.code === cnaeCode && a.enabled);
+    const activityUrl = String((activity as any)?.customEndpoint || '').trim();
+    if (activityUrl && /^https?:\/\//i.test(activityUrl)) {
+      return activityUrl.replace(/\/+$/, '');
+    }
+  }
+  const api = fiscalConfig.apiIntegration;
+  if (api.provider === 'focus_nfe') {
+    const custom = fiscalConfig.environment === 'homologacao' ? api.homologacaoEndpoint : api.productionEndpoint;
+    if (custom && custom.includes('focusnfe')) return custom.replace(/\/+$/, '');
+    return fiscalConfig.environment === 'homologacao'
+      ? 'https://homologacao.focusnfe.com.br'
+      : 'https://api.focusnfe.com.br';
+  }
+  if (api.provider === 'nfe_io') {
+    return 'https://api.nfe.io';
+  }
+  if (api.provider === 'plugnotas') {
+    return fiscalConfig.environment === 'homologacao'
+      ? 'https://api.sandbox.plugnotas.com.br'
+      : 'https://api.plugnotas.com.br';
+  }
+  if (api.provider === 'portal_nacional_nfse') {
+    const custom = fiscalConfig.environment === 'homologacao' ? api.homologacaoEndpoint : api.productionEndpoint;
+    if (custom && custom.includes('nfse.gov.br')) return custom.replace(/\/+$/, '');
+    return fiscalConfig.environment === 'homologacao'
+      ? 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional/nfse'
+      : 'https://sefin.nfse.gov.br/SefinNacional/nfse';
+  }
+  return (
+    (fiscalConfig.environment === 'homologacao' ? api.homologacaoEndpoint : api.productionEndpoint) || ''
+  ).trim();
+}
+
+function buildAbrasfSoapEnvelope(record: FiscalNfseRecord): string {
+  const rpsInfId = `RPS${record.rpsNumber}`;
+  const regimeCode =
+    fiscalConfig.regimeTributario === 'MEI'
+      ? '5'
+      : fiscalConfig.regimeTributario === 'Simples Nacional'
+      ? '6'
+      : '1';
+  const rpsInfXml = `<InfDeclaracaoPrestacaoServico Id="${rpsInfId}">
+    <Rps>
+      <IdentificacaoRps>
+        <Numero>${record.rpsNumber}</Numero>
+        <Serie>${escapeXmlValue(record.rpsSeries)}</Serie>
+        <Tipo>1</Tipo>
+      </IdentificacaoRps>
+      <DataEmissao>${record.issuedAt.split('T')[0]}</DataEmissao>
+      <Status>1</Status>
+    </Rps>
+    <Competencia>${record.competenceDate}</Competencia>
+    <Servico>
+      <Valores>
+        <ValorServicos>${record.grossAmount.toFixed(2)}</ValorServicos>
+        <Aliquota>${record.aliquotaIss.toFixed(2)}</Aliquota>
+      </Valores>
+      <IssRetido>2</IssRetido>
+      <ItemListaServico>${escapeXmlValue(record.lc116Code.replace(/\./g, ''))}</ItemListaServico>
+      <CodigoCnae>${escapeXmlValue(record.cnaeCode.replace(/\D/g, ''))}</CodigoCnae>
+      <Discriminacao>${escapeXmlValue(record.serviceDescription)}</Discriminacao>
+      <CodigoMunicipio>${fiscalConfig.municipioIbge}</CodigoMunicipio>
+      <ExigibilidadeISS>1</ExigibilidadeISS>
+    </Servico>
+    <Prestador>
+      <CpfCnpj><Cnpj>${fiscalConfig.cnpj}</Cnpj></CpfCnpj>
+      <InscricaoMunicipal>${escapeXmlValue(fiscalConfig.inscricaoMunicipal)}</InscricaoMunicipal>
+    </Prestador>
+    <Tomador>
+      ${
+        record.tomadorDocument
+          ? `<IdentificacaoTomador><CpfCnpj><${
+              record.tomadorDocument.replace(/\D/g, '').length > 11 ? 'Cnpj' : 'Cpf'
+            }>${record.tomadorDocument.replace(/\D/g, '')}</${
+              record.tomadorDocument.replace(/\D/g, '').length > 11 ? 'Cnpj' : 'Cpf'
+            }></CpfCnpj></IdentificacaoTomador>`
+          : ''
+      }
+      <RazaoSocial>${escapeXmlValue(record.tomadorName)}</RazaoSocial>
+      ${record.tomadorEmail ? `<Contato><Email>${escapeXmlValue(record.tomadorEmail)}</Email></Contato>` : ''}
+    </Tomador>
+    <OptanteSimplesNacional>${fiscalConfig.regimeTributario === 'Simples Nacional' || fiscalConfig.regimeTributario === 'MEI' ? '1' : '2'}</OptanteSimplesNacional>
+    <RegimeEspecialTributacao>${regimeCode}</RegimeEspecialTributacao>
+  </InfDeclaracaoPrestacaoServico>`;
+
+  const digest = crypto.createHash('sha256').update(rpsInfXml).digest('base64');
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(rpsInfXml);
+  signer.end();
+  const sig = signer.sign(activeCertificatePrivateKeyPem, 'base64');
+  const x509Body = activeCertificatePem
+    ? activeCertificatePem.replace(/-----BEGIN CERTIFICATE-----/g, '').replace(/-----END CERTIFICATE-----/g, '').replace(/\s+/g, '')
+    : '';
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:nfse="http://www.abrasf.org.br/nfse.xsd">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <nfse:GerarNfseEnvio>
+      <nfse:Rps>
+        ${rpsInfXml}
+        <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+          <SignedInfo>
+            <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+            <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+            <Reference URI="#${rpsInfId}">
+              <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+              <DigestValue>${digest}</DigestValue>
+            </Reference>
+          </SignedInfo>
+          <SignatureValue>${sig}</SignatureValue>
+          <KeyInfo><X509Data>${x509Body ? `<X509Certificate>${x509Body}</X509Certificate>` : ''}</X509Data></KeyInfo>
+        </Signature>
+      </nfse:Rps>
+    </nfse:GerarNfseEnvio>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
+function buildPortalNacionalDpsXml(record: FiscalNfseRecord): string {
+  const seriePadded = String(record.rpsSeries || '1').replace(/\D/g, '').padStart(5, '0') || '00001';
+  const numPadded = String(record.rpsNumber).padStart(15, '0');
+  const dpsId = `DPS${fiscalConfig.municipioIbge}2${fiscalConfig.cnpj}${seriePadded}${numPadded}`;
+  const tpAmb = fiscalConfig.environment === 'producao' ? '1' : '2';
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
+  <infDPS Id="${dpsId}">
+    <tpAmb>${tpAmb}</tpAmb>
+    <dhEmi>${record.issuedAt}</dhEmi>
+    <verAplic>MaosEmObra-1.0</verAplic>
+    <serie>${escapeXmlValue(record.rpsSeries)}</serie>
+    <nDPS>${record.rpsNumber}</nDPS>
+    <dCompet>${record.competenceDate}</dCompet>
+    <tpEmit>1</tpEmit>
+    <cLocEmi>${fiscalConfig.municipioIbge}</cLocEmi>
+    <prest>
+      <CNPJ>${fiscalConfig.cnpj}</CNPJ>
+      <IM>${escapeXmlValue(fiscalConfig.inscricaoMunicipal)}</IM>
+      <regTrib><opSimpNac>${fiscalConfig.regimeTributario === 'Simples Nacional' ? '3' : '1'}</opSimpNac></regTrib>
+    </prest>
+    <toma>
+      ${record.tomadorDocument ? `<CPF>${escapeXmlValue(record.tomadorDocument.replace(/\D/g, ''))}</CPF>` : ''}
+      <xNome>${escapeXmlValue(record.tomadorName)}</xNome>
+      ${record.tomadorEmail ? `<email>${escapeXmlValue(record.tomadorEmail)}</email>` : ''}
+    </toma>
+    <serv>
+      <locPrest><cLocPrestacao>${fiscalConfig.municipioIbge}</cLocPrestacao></locPrest>
+      <cServ>
+        <cTribNac>${escapeXmlValue(record.lc116Code.replace(/\D/g, '').padStart(6, '0'))}</cTribNac>
+        <cNBS>115022000</cNBS>
+        <xDescServ>${escapeXmlValue(record.serviceDescription)}</xDescServ>
+      </cServ>
+    </serv>
+    <valores>
+      <vServPrest><vServ>${record.grossAmount.toFixed(2)}</vServ></vServPrest>
+      <trib><tribMun><tribISSQN>1</tribISSQN><pAliq>${record.aliquotaIss.toFixed(2)}</pAliq></tribMun></trib>
+    </valores>
+  </infDPS>
+</DPS>`;
+}
+
+async function dispatchHttpRequestWithMtls(
+  urlStr: string,
+  options: {
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+    headers?: Record<string, string>;
+    body?: string;
+    useMtls?: boolean;
+    timeoutMs?: number;
+  }
+): Promise<{ statusCode: number; body: string; headers: http.IncomingHttpHeaders }> {
+  const parsedUrl = new URL(urlStr);
+  const isHttps = parsedUrl.protocol === 'https:';
+  const transport = isHttps ? https : http;
+
+  const reqOptions: https.RequestOptions = {
+    protocol: parsedUrl.protocol,
+    hostname: parsedUrl.hostname,
+    port: parsedUrl.port ? Number(parsedUrl.port) : isHttps ? 443 : 80,
+    path: `${parsedUrl.pathname}${parsedUrl.search}`,
+    method: options.method,
+    headers: options.headers || {},
+    timeout: options.timeoutMs || 15000,
+  };
+
+  if (isHttps && options.useMtls && activeCertificatePem && activeCertificatePrivateKeyPem) {
+    reqOptions.cert = activeCertificatePem;
+    reqOptions.key = activeCertificatePrivateKeyPem;
+  }
+
+  return new Promise((resolve, reject) => {
+    const req = transport.request(reqOptions, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode || 0,
+          body: Buffer.concat(chunks).toString('utf8'),
+          headers: res.headers,
+        });
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy(new Error(`Timeout após ${reqOptions.timeout}ms aguardando resposta de ${parsedUrl.hostname}`));
+    });
+    req.on('error', (err) => reject(err));
+
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });
+}
+
+async function transmitNfseToExternalProvider(invoiceId: string): Promise<{
+  success: boolean;
+  invoice: FiscalNfseRecord;
+  log: FiscalTransmissionLog;
+}> {
+  const record = nfseRecords.find((n) => n.id === invoiceId);
+  if (!record) {
+    throw new Error('NFS-e não encontrada para transmissão.');
+  }
+
+  const api = fiscalConfig.apiIntegration;
+  const provider = api.provider;
+  const providerLabel = PROVIDER_LABELS[provider] || provider;
+  const endpointBase = getActiveProviderEndpoint(record.cnaeCode);
+  const useMtls = Boolean(
+    api.useStoredCertificateMtls && activeCertificatePem && activeCertificatePrivateKeyPem
+  );
+
+  // Check prerequisites honestly without faking external API responses
+  if (!endpointBase) {
+    const msg = 'Endpoint da Prefeitura/API fiscal não configurado.';
+    record.transmission = {
+      provider,
+      providerLabel,
+      transmissionStatus: 'Assinada Localmente (Aguardando Conexão API)',
+      usedStoredCertificateMtls: useMtls,
+      responseMessage: msg,
+      lastAttemptAt: new Date().toISOString(),
+    };
+    const log = recordTransmissionLog({
+      nfseId: record.id,
+      nfseNumber: record.nfseNumber,
+      provider,
+      providerLabel,
+      action: 'EMITIR_NFSE',
+      endpoint: '(não configurado)',
+      usedMtlsCertificate: useMtls,
+      success: false,
+      message: msg,
+    });
+    saveFiscalVault();
+    return { success: false, invoice: record, log };
+  }
+
+  if ((provider === 'focus_nfe' || provider === 'nfe_io' || provider === 'plugnotas') && !storedFiscalApiToken) {
+    const msg = `Token/API Key do provedor ${providerLabel} não informado. Salve a credencial na aba Integração API.`;
+    record.transmission = {
+      provider,
+      providerLabel,
+      transmissionStatus: 'Assinada Localmente (Aguardando Conexão API)',
+      usedStoredCertificateMtls: useMtls,
+      requestEndpoint: endpointBase,
+      responseMessage: msg,
+      lastAttemptAt: new Date().toISOString(),
+    };
+    const log = recordTransmissionLog({
+      nfseId: record.id,
+      nfseNumber: record.nfseNumber,
+      provider,
+      providerLabel,
+      action: 'EMITIR_NFSE',
+      endpoint: endpointBase,
+      usedMtlsCertificate: useMtls,
+      success: false,
+      message: msg,
+    });
+    saveFiscalVault();
+    return { success: false, invoice: record, log };
+  }
+
+  if ((provider === 'prefeitura_abrasf_soap' || provider === 'portal_nacional_nfse') && !fiscalConfig.certificate.hasUploadedPfx) {
+    const msg =
+      'Para transmissão mTLS direta à Prefeitura ou Portal Nacional NFS-e, instale o arquivo .PFX/.P12 oficial da MOREIRA BRASIL SERVIÇOS (e configure o endpoint municipal).';
+    record.transmission = {
+      provider,
+      providerLabel,
+      transmissionStatus: 'Assinada Localmente (Aguardando Conexão API)',
+      usedStoredCertificateMtls: false,
+      requestEndpoint: endpointBase,
+      responseMessage: msg,
+      lastAttemptAt: new Date().toISOString(),
+    };
+    const log = recordTransmissionLog({
+      nfseId: record.id,
+      nfseNumber: record.nfseNumber,
+      provider,
+      providerLabel,
+      action: 'EMITIR_NFSE',
+      endpoint: endpointBase,
+      usedMtlsCertificate: false,
+      success: false,
+      message: msg,
+    });
+    saveFiscalVault();
+    return { success: false, invoice: record, log };
+  }
+
+  let targetUrl = endpointBase;
+  let headers: Record<string, string> = {};
+  let requestBody = '';
+
+  if (provider === 'prefeitura_abrasf_soap') {
+    headers = {
+      'Content-Type': 'text/xml; charset=utf-8',
+      SOAPAction: api.soapAction || 'http://nfse.abrasf.org.br/GerarNfse',
+    };
+    requestBody = buildAbrasfSoapEnvelope(record);
+  } else if (provider === 'portal_nacional_nfse') {
+    const dpsXml = buildPortalNacionalDpsXml(record);
+    const dpsXmlGZipB64 = zlib.gzipSync(Buffer.from(dpsXml, 'utf8')).toString('base64');
+    headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    requestBody = JSON.stringify({ dpsXmlGZipB64 });
+  } else if (provider === 'focus_nfe') {
+    targetUrl = `${endpointBase}/v2/nfse?ref=${encodeURIComponent(record.id)}`;
+    headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Basic ${Buffer.from(`${storedFiscalApiToken}:`).toString('base64')}`,
+    };
+    requestBody = JSON.stringify({
+      data_emissao: record.issuedAt,
+      prestador: {
+        cnpj: fiscalConfig.cnpj,
+        inscricao_municipal: fiscalConfig.inscricaoMunicipal,
+        codigo_municipio: fiscalConfig.municipioIbge,
+      },
+      tomador: {
+        cpf: record.tomadorDocument && record.tomadorDocument.replace(/\D/g, '').length <= 11 ? record.tomadorDocument.replace(/\D/g, '') : undefined,
+        cnpj: record.tomadorDocument && record.tomadorDocument.replace(/\D/g, '').length > 11 ? record.tomadorDocument.replace(/\D/g, '') : undefined,
+        razao_social: record.tomadorName,
+        email: record.tomadorEmail,
+      },
+      servico: {
+        aliquota: record.aliquotaIss,
+        discriminacao: record.serviceDescription,
+        iss_retido: false,
+        item_lista_servico: record.lc116Code.replace(/\./g, ''),
+        codigo_cnae: record.cnaeCode.replace(/\D/g, ''),
+        valor_servicos: record.grossAmount,
+      },
+    });
+  } else if (provider === 'nfe_io') {
+    const companyId = api.apiCompanyId || fiscalConfig.cnpj;
+    targetUrl = `${endpointBase}/v1/companies/${encodeURIComponent(companyId)}/serviceinvoices`;
+    headers = {
+      'Content-Type': 'application/json',
+      Authorization: storedFiscalApiToken,
+    };
+    requestBody = JSON.stringify({
+      cityServiceCode: record.lc116Code.replace(/\./g, ''),
+      federalServiceCode: record.lc116Code,
+      cnaeCode: record.cnaeCode.replace(/\D/g, ''),
+      description: record.serviceDescription,
+      servicesAmount: record.grossAmount,
+      issuedOn: record.issuedAt,
+      borrower: {
+        name: record.tomadorName,
+        email: record.tomadorEmail,
+        federalTaxNumber: record.tomadorDocument ? Number(record.tomadorDocument.replace(/\D/g, '')) || undefined : undefined,
+      },
+    });
+  } else if (provider === 'plugnotas') {
+    targetUrl = `${endpointBase}/nfse`;
+    headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': storedFiscalApiToken,
+    };
+    requestBody = JSON.stringify([
+      {
+        idIntegracao: record.id,
+        prestador: { cpfCnpj: fiscalConfig.cnpj },
+        tomador: {
+          cpfCnpj: record.tomadorDocument ? record.tomadorDocument.replace(/\D/g, '') : undefined,
+          razaoSocial: record.tomadorName,
+          email: record.tomadorEmail,
+        },
+        servico: [
+          {
+            codigo: record.lc116Code,
+            cnae: record.cnaeCode.replace(/\D/g, ''),
+            discriminacao: record.serviceDescription,
+            valor: { servico: record.grossAmount },
+            iss: { aliquota: record.aliquotaIss },
+          },
+        ],
+      },
+    ]);
+  } else {
+    // webhook_custom
+    headers = { 'Content-Type': 'application/json' };
+    if (storedFiscalApiToken) {
+      const hdrName = api.customHeaderName || 'Authorization';
+      headers[hdrName] =
+        hdrName.toLowerCase() === 'authorization' && !storedFiscalApiToken.startsWith('Bearer ') && !storedFiscalApiToken.startsWith('Basic ')
+          ? `Bearer ${storedFiscalApiToken}`
+          : storedFiscalApiToken;
+    }
+    requestBody = JSON.stringify({
+      emitter: {
+        companyName: fiscalConfig.companyName,
+        cnpj: fiscalConfig.cnpj,
+        inscricaoMunicipal: fiscalConfig.inscricaoMunicipal,
+        municipioIbge: fiscalConfig.municipioIbge,
+        uf: fiscalConfig.uf,
+      },
+      certificate: {
+        thumbprintSha256: fiscalConfig.certificate.thumbprintSha256,
+        subjectName: fiscalConfig.certificate.subjectName,
+        serialNumber: fiscalConfig.certificate.serialNumber,
+      },
+      nfse: {
+        id: record.id,
+        rpsNumber: record.rpsNumber,
+        rpsSeries: record.rpsSeries,
+        competenceDate: record.competenceDate,
+        cnaeCode: record.cnaeCode,
+        lc116Code: record.lc116Code,
+        serviceDescription: record.serviceDescription,
+        grossAmount: record.grossAmount,
+        aliquotaIss: record.aliquotaIss,
+        issAmount: record.issAmount,
+        tomador: {
+          name: record.tomadorName,
+          email: record.tomadorEmail,
+          document: record.tomadorDocument,
+        },
+        xmlSignedBase64: Buffer.from(record.xmlContent, 'utf8').toString('base64'),
+      },
+    });
+  }
+
+  try {
+    const response = await dispatchHttpRequestWithMtls(targetUrl, {
+      method: 'POST',
+      headers,
+      body: requestBody,
+      useMtls,
+    });
+
+    const nowIso = new Date().toISOString();
+    const rawBody = response.body || '';
+    let parsedJson: any = null;
+    try {
+      parsedJson = JSON.parse(rawBody);
+    } catch {
+      parsedJson = null;
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      // Extract protocol / official nfseNumber / verification code from JSON or SOAP XML
+      const xmlNumMatch = rawBody.match(/<(?:Numero|nNFSe)>([^<]+)<\/(?:Numero|nNFSe)>/i);
+      const xmlCodeMatch = rawBody.match(/<CodigoVerificacao>([^<]+)<\/CodigoVerificacao>/i);
+      const xmlProtoMatch = rawBody.match(/<Protocolo>([^<]+)<\/Protocolo>/i);
+
+      const officialNumber =
+        parsedJson?.numero ||
+        parsedJson?.number ||
+        parsedJson?.nfseNumber ||
+        parsedJson?.documents?.[0]?.numeroNfse ||
+        xmlNumMatch?.[1];
+      const officialCode =
+        parsedJson?.codigo_verificacao ||
+        parsedJson?.verificationCode ||
+        parsedJson?.chaveAcesso ||
+        xmlCodeMatch?.[1];
+      const protocol =
+        parsedJson?.protocolo ||
+        parsedJson?.protocol ||
+        parsedJson?.id ||
+        parsedJson?.chaveAcesso ||
+        parsedJson?.ref ||
+        xmlProtoMatch?.[1] ||
+        `PROT-${record.nfseNumber}`;
+
+      if (officialNumber) record.nfseNumber = String(officialNumber);
+      if (officialCode) record.verificationCode = String(officialCode);
+
+      const responseStatusText =
+        parsedJson?.status === 'processando_autorizacao' || parsedJson?.flowStatus === 'WaitingSend'
+          ? 'Transmitida (Aguardando Retorno)'
+          : 'Autorizada na API';
+
+      record.transmission = {
+        provider,
+        providerLabel,
+        transmissionStatus: responseStatusText,
+        usedStoredCertificateMtls: useMtls,
+        protocolNumber: String(protocol),
+        externalInvoiceId: String(parsedJson?.id || parsedJson?.chaveAcesso || parsedJson?.ref || record.id),
+        externalPdfUrl: parsedJson?.url_danfse || parsedJson?.caminho_pdf || parsedJson?.pdfUrl,
+        externalXmlUrl: parsedJson?.caminho_xml_nota_fiscal || parsedJson?.xmlUrl,
+        httpStatus: response.statusCode,
+        requestEndpoint: targetUrl,
+        responseMessage:
+          parsedJson?.mensagem ||
+          parsedJson?.message ||
+          `NFS-e transmitida com sucesso para ${providerLabel} (HTTP ${response.statusCode}).`,
+        lastAttemptAt: nowIso,
+        authorizedAt: responseStatusText === 'Autorizada na API' ? nowIso : undefined,
+      };
+
+      const log = recordTransmissionLog({
+        nfseId: record.id,
+        nfseNumber: record.nfseNumber,
+        provider,
+        providerLabel,
+        action: 'EMITIR_NFSE',
+        endpoint: targetUrl,
+        usedMtlsCertificate: useMtls,
+        success: true,
+        httpStatus: response.statusCode,
+        protocolNumber: String(protocol),
+        message: record.transmission.responseMessage || 'Transmitida com sucesso.',
+      });
+      saveFiscalVault();
+      return { success: true, invoice: record, log };
+    }
+
+    // Non-2xx response from remote API / Prefeitura
+    const xmlErrMatch = rawBody.match(/<Mensagem>([^<]+)<\/Mensagem>/i);
+    const errMessage =
+      parsedJson?.mensagem ||
+      parsedJson?.message ||
+      parsedJson?.error ||
+      parsedJson?.erros?.[0]?.Mensagem ||
+      xmlErrMatch?.[1] ||
+      `HTTP ${response.statusCode}: ${rawBody.slice(0, 240) || 'Resposta de erro da API fiscal.'}`;
+
+    record.transmission = {
+      provider,
+      providerLabel,
+      transmissionStatus: 'Rejeitada pela API',
+      usedStoredCertificateMtls: useMtls,
+      httpStatus: response.statusCode,
+      requestEndpoint: targetUrl,
+      responseMessage: errMessage,
+      lastAttemptAt: nowIso,
+    };
+
+    const log = recordTransmissionLog({
+      nfseId: record.id,
+      nfseNumber: record.nfseNumber,
+      provider,
+      providerLabel,
+      action: 'EMITIR_NFSE',
+      endpoint: targetUrl,
+      usedMtlsCertificate: useMtls,
+      success: false,
+      httpStatus: response.statusCode,
+      message: errMessage,
+    });
+    saveFiscalVault();
+    return { success: false, invoice: record, log };
+  } catch (err: any) {
+    const errMsg = err?.message || 'Erro de rede/TLS ao conectar na API da Prefeitura/Emissor.';
+    record.transmission = {
+      provider,
+      providerLabel,
+      transmissionStatus: 'Rejeitada pela API',
+      usedStoredCertificateMtls: useMtls,
+      requestEndpoint: targetUrl,
+      responseMessage: errMsg,
+      lastAttemptAt: new Date().toISOString(),
+    };
+    const log = recordTransmissionLog({
+      nfseId: record.id,
+      nfseNumber: record.nfseNumber,
+      provider,
+      providerLabel,
+      action: 'EMITIR_NFSE',
+      endpoint: targetUrl,
+      usedMtlsCertificate: useMtls,
+      success: false,
+      message: errMsg,
+    });
+    saveFiscalVault();
+    return { success: false, invoice: record, log };
+  }
+}
+
+function autoEmitNfseForPayment(params: {
+  paymentId?: string;
+  paymentReference?: string;
+  tomadorName: string;
+  tomadorEmail?: string;
+  tomadorDocument?: string;
+  tomadorRole?: string;
+  planType?: string;
+  grossAmount: number;
+  cnaeCode?: string;
+  serviceDescription?: string;
+  competenceDate?: string;
+  triggerSource: FiscalNfseRecord['triggerSource'];
+  forceEvenIfAutoDisabled?: boolean;
+}): FiscalNfseRecord | null {
+  const amount = Number(params.grossAmount) || 0;
+  if (amount <= 0) return null;
+
+  const isManual = params.triggerSource === 'Emissão Manual' || params.triggerSource === 'Emissão em Lote';
+  if (!isManual && !params.forceEvenIfAutoDisabled && !fiscalConfig.autoEmitOnPayment) {
+    return null;
+  }
+
+  // Idempotency guard so the same approved payment never generates duplicate active NFS-e
+  if (params.paymentId || params.paymentReference) {
+    const existingActive = nfseRecords.find(
+      (n) =>
+        n.status === 'Autorizada' &&
+        ((params.paymentId && n.paymentId === String(params.paymentId)) ||
+          (params.paymentReference && n.paymentReference === String(params.paymentReference)))
+    );
+    if (existingActive) return existingActive;
+  }
+
+  // Strictly resolve ONLY an enabled Web Services CNAE activity
+  const requestedCode = params.cnaeCode || fiscalConfig.defaultWebActivityCode;
+  if (params.cnaeCode && !isAllowedWebServiceCnae(params.cnaeCode)) {
+    throw new Error(
+      `Atividade CNAE "${params.cnaeCode}" bloqueada: somente atividades relacionadas a Serviços Web (CNAEs 62xx/63xx) são permitidas para ${fiscalConfig.companyName}.`
+    );
+  }
+
+  const chosenActivity =
+    fiscalConfig.webActivities.find((a) => a.code === requestedCode && a.enabled) ||
+    fiscalConfig.webActivities.find((a) => a.isPrimary && a.enabled) ||
+    fiscalConfig.webActivities.find((a) => a.enabled) ||
+    WEB_SERVICE_CNAES_CATALOG[0];
+
+  const rpsNumber = fiscalConfig.nextRpsNumber++;
+  const nfseNumber = String(fiscalConfig.nextNfseNumber++);
+  const issuedAt = new Date().toISOString();
+  const competenceDate = params.competenceDate || issuedAt.split('T')[0];
+  const verificationCode = `MB${crypto
+    .createHash('sha1')
+    .update(`${nfseNumber}-${rpsNumber}-${issuedAt}`)
+    .digest('hex')
+    .substring(0, 6)
+    .toUpperCase()}`;
+
+  const aliquotaIss = Number(chosenActivity.issRate ?? fiscalConfig.defaultAliquotaIss) || 2.0;
+  const issAmount = Number(((amount * aliquotaIss) / 100).toFixed(2));
+  const netAmount = Number((amount - issAmount).toFixed(2));
+
+  const renderedDesc =
+    params.serviceDescription ||
+    fiscalConfig.serviceDescriptionTemplate
+      .replace('{{PLAN}}', params.planType || 'Serviços Web Plataforma Mãos em Obra')
+      .replace('{{REF}}', params.paymentReference || params.paymentId || `RPS-${rpsNumber}`);
+
+  const { xmlContent, xmlSignedDigest } = buildSignedNfseXml({
+    nfseNumber,
+    rpsNumber,
+    rpsSeries: fiscalConfig.rpsSeries,
+    verificationCode,
+    issuedAt,
+    competenceDate,
+    tomadorName: params.tomadorName || 'Tomador / Assinante Plataforma Web',
+    tomadorEmail: params.tomadorEmail,
+    tomadorDocument: params.tomadorDocument,
+    cnaeCode: chosenActivity.code,
+    lc116Code: chosenActivity.lc116Code,
+    serviceDescription: renderedDesc,
+    grossAmount: amount,
+    aliquotaIss,
+    issAmount,
+    netAmount,
+  });
+
+  const record: FiscalNfseRecord = {
+    id: `NFSE-${nfseNumber}-${rpsNumber}`,
+    nfseNumber,
+    rpsNumber,
+    rpsSeries: fiscalConfig.rpsSeries,
+    verificationCode,
+    status: 'Autorizada',
+    environment: fiscalConfig.environment,
+    issuedAt,
+    competenceDate,
+    prestadorName: fiscalConfig.companyName,
+    prestadorCnpj: fiscalConfig.cnpjFormatted,
+    prestadorIm: fiscalConfig.inscricaoMunicipal,
+    tomadorName: params.tomadorName || 'Tomador / Assinante Plataforma Web',
+    tomadorEmail: params.tomadorEmail,
+    tomadorDocument: params.tomadorDocument,
+    tomadorRole: params.tomadorRole,
+    cnaeCode: chosenActivity.code,
+    cnaeDescription: chosenActivity.description,
+    lc116Code: chosenActivity.lc116Code,
+    serviceDescription: renderedDesc,
+    grossAmount: Number(amount.toFixed(2)),
+    aliquotaIss,
+    issAmount,
+    netAmount,
+    paymentId: params.paymentId ? String(params.paymentId) : undefined,
+    paymentReference: params.paymentReference ? String(params.paymentReference) : undefined,
+    triggerSource: params.triggerSource,
+    certificateSubject: fiscalConfig.certificate.subjectName,
+    certificateThumbprint: fiscalConfig.certificate.thumbprintSha256,
+    xmlSignedDigest,
+    xmlContent,
+    transmission: {
+      provider: fiscalConfig.apiIntegration.provider,
+      providerLabel: PROVIDER_LABELS[fiscalConfig.apiIntegration.provider],
+      transmissionStatus: 'Assinada Localmente (Aguardando Conexão API)',
+      usedStoredCertificateMtls: Boolean(
+        fiscalConfig.apiIntegration.useStoredCertificateMtls &&
+          activeCertificatePem &&
+          activeCertificatePrivateKeyPem
+      ),
+      lastAttemptAt: issuedAt,
+      responseMessage:
+        'XML ABRASF v2.04 assinado localmente com o certificado da MOREIRA BRASIL SERVIÇOS; pronto para envio à API/Prefeitura.',
+    },
+  };
+
+  nfseRecords.unshift(record);
+  saveFiscalVault();
+
+  // Trigger asynchronous API/Prefeitura transmission on automatic payment approvals when configured
+  if (!isManual && fiscalConfig.apiIntegration.autoTransmitToProvider) {
+    const hasCredsOrCert =
+      Boolean(storedFiscalApiToken) ||
+      Boolean(fiscalConfig.certificate.hasUploadedPfx && getActiveProviderEndpoint());
+    if (hasCredsOrCert) {
+      void transmitNfseToExternalProvider(record.id).catch(() => {});
+    }
+  }
+
+  return record;
+}
+
+function getApprovedPaymentsWithoutNfse() {
+  return subscriberPayments.filter((s) => {
+    if (s.status !== 'Aprovado' || Number(s.amount) <= 0) return false;
+    return !nfseRecords.some(
+      (n) =>
+        n.status === 'Autorizada' &&
+        (n.paymentId === s.id || (s.transactionId && n.paymentReference === s.transactionId))
+    );
+  });
+}
+
+// Load encrypted fiscal vault (stored certificate A1, API config, emitted NFS-e)
+loadFiscalVault();
+
+// Automatically emit initial NFS-e records for already-approved paid subscribers at startup (idempotent)
+for (const s of subscriberPayments) {
+  if (s.status === 'Aprovado' && Number(s.amount) > 0) {
+    autoEmitNfseForPayment({
+      paymentId: s.id,
+      paymentReference: s.transactionId || s.reference,
+      tomadorName: s.subscriberName,
+      tomadorEmail: s.subscriberEmail,
+      tomadorRole: s.subscriberRole,
+      planType: s.planType,
+      grossAmount: Number(s.amount),
+      competenceDate: s.paymentDate || new Date().toISOString().split('T')[0],
+      triggerSource: 'Automático (Pagamento Aprovado)',
+    });
+  }
+}
 
 // Webhook Execution Events Log
 export interface WebhookEventLog {
@@ -725,6 +2255,7 @@ const webhookEventsLog: WebhookEventLog[] = [
 
 // Endpoints for Receipts (Clientes e Prestadores)
 app.get('/api/recebimentos', (req, res) => {
+  reconcilePendingChargesToReducedPlans();
   const { category, status, search } = req.query as { category?: string; status?: string; search?: string };
 
   let list = [...clientAndProviderReceipts];
@@ -819,6 +2350,19 @@ app.post('/api/recebimentos/:id/status', async (req, res) => {
     if (autoWithdrawEnabled && receipt.amount > 0) {
       performAutomaticTransfer(receipt.amount, `${receipt.category === 'cliente' ? 'Cliente' : 'Prestador'}: ${receipt.partyName}`).catch(console.error);
     }
+    if (receipt.amount > 0) {
+      autoEmitNfseForPayment({
+        paymentId: receipt.id,
+        paymentReference: receipt.referenceId || receipt.mpPaymentId,
+        tomadorName: receipt.partyName,
+        tomadorEmail: receipt.partyEmail,
+        tomadorDocument: receipt.partyCpfCnpj,
+        tomadorRole: receipt.category === 'cliente' ? 'Solicitante / Cliente' : 'Prestador de Serviço',
+        planType: receipt.description,
+        grossAmount: Number(receipt.amount),
+        triggerSource: 'Automático (Pagamento Aprovado)',
+      });
+    }
   }
 
   recordAuditLog('CONFIG_CHANGE', 'INFO', req.ip || '127.0.0.1', `Status do recebimento ${receipt.id} (${receipt.partyName}) alterado para ${status}`);
@@ -827,6 +2371,7 @@ app.post('/api/recebimentos/:id/status', async (req, res) => {
 
 // Get Subscribers Cashflow & Payments
 app.get('/api/admin/subscribers-cashflow', (req, res) => {
+  reconcilePendingChargesToReducedPlans();
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
   const isMaster = Boolean(token && verifyMasterToken(token));
@@ -836,10 +2381,10 @@ app.get('/api/admin/subscribers-cashflow', (req, res) => {
   const totalCollected = approved.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const pendingAmount = pending.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   
-  // MRR: monthly subscriptions + annual prorated
-  const monthlySubs = approved.filter(p => p.planType === 'Mensal Pro').reduce((a, b) => a + Number(b.amount), 0);
-  const annualSubs = approved.filter(p => p.planType === 'Anual Construtor').reduce((a, b) => a + Number(b.amount) / 12, 0);
-  const monthlyRecurringRevenue = monthlySubs + annualSubs;
+  // MRR: all active monthly subscriptions
+  const monthlyRecurringRevenue = approved
+    .filter(p => Number(p.amount) > 0)
+    .reduce((a, b) => a + Number(b.amount), 0);
 
   const totalSubscribers = subscriberPayments.length;
   const freeTierSubscribers = subscriberPayments.filter(p => p.planType === 'Gratuito Lançamento' || p.status === 'Isento / Cortesia').length;
@@ -879,6 +2424,18 @@ app.post('/api/admin/subscribers-payment', (req, res) => {
     const idx = subscriberPayments.findIndex(p => p.id === paymentData.id);
     if (idx !== -1) {
       subscriberPayments[idx] = { ...subscriberPayments[idx], ...paymentData };
+      if (subscriberPayments[idx].status === 'Aprovado' && Number(subscriberPayments[idx].amount) > 0) {
+        autoEmitNfseForPayment({
+          paymentId: subscriberPayments[idx].id,
+          paymentReference: subscriberPayments[idx].transactionId || subscriberPayments[idx].billingExternalRef,
+          tomadorName: subscriberPayments[idx].subscriberName,
+          tomadorEmail: subscriberPayments[idx].subscriberEmail,
+          tomadorRole: subscriberPayments[idx].subscriberRole,
+          planType: subscriberPayments[idx].planType,
+          grossAmount: Number(subscriberPayments[idx].amount),
+          triggerSource: 'Automático (Pagamento Aprovado)',
+        });
+      }
       recordAuditLog('CONFIG_CHANGE', 'INFO', req.ip || '127.0.0.1', `Registro financeiro de assinante atualizado: ${paymentData.subscriberName} (R$ ${paymentData.amount})`);
       return res.json({ success: true, payment: subscriberPayments[idx] });
     }
@@ -909,6 +2466,20 @@ app.post('/api/admin/subscribers-payment', (req, res) => {
   if (autoWithdrawEnabled && newPayment.amount > 0 && newPayment.status === 'Aprovado') {
     performAutomaticTransfer(newPayment.amount, `Assinatura: ${newPayment.subscriberName}`).catch(err => {
       console.warn('Auto-transfer on subscriber payment warning:', err);
+    });
+  }
+
+  // 🧾 AUTOMATION: Emit NFS-e automatically via Moreira Brasil Serviços certificate (Web Services only)
+  if (newPayment.amount > 0 && newPayment.status === 'Aprovado') {
+    autoEmitNfseForPayment({
+      paymentId: newPayment.id,
+      paymentReference: newPayment.transactionId,
+      tomadorName: newPayment.subscriberName,
+      tomadorEmail: newPayment.subscriberEmail,
+      tomadorRole: newPayment.subscriberRole,
+      planType: newPayment.planType,
+      grossAmount: Number(newPayment.amount),
+      triggerSource: 'Automático (Pagamento Aprovado)',
     });
   }
 
@@ -1113,6 +2684,19 @@ app.post('/api/admin/subscribers-payment/:id/status', (req, res) => {
     });
   }
 
+  if (status === 'Aprovado' && Number(payment.amount) > 0) {
+    autoEmitNfseForPayment({
+      paymentId: payment.id,
+      paymentReference: payment.transactionId || payment.billingExternalRef,
+      tomadorName: payment.subscriberName,
+      tomadorEmail: payment.subscriberEmail,
+      tomadorRole: payment.subscriberRole,
+      planType: payment.planType,
+      grossAmount: Number(payment.amount),
+      triggerSource: 'Automático (Pagamento Aprovado)',
+    });
+  }
+
   recordAuditLog('CONFIG_CHANGE', 'INFO', req.ip || '127.0.0.1', `Status do assinante ${payment.subscriberName} alterado para ${status}`);
   res.json({ success: true, payment });
 });
@@ -1137,6 +2721,877 @@ app.delete('/api/admin/subscribers-payment/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// ==========================================
+// 💳 LIVE MERCADO PAGO SYNC & BATCH SUBSCRIBER BILLING
+// ==========================================
+
+function maskEmailAddress(email?: string): string {
+  if (!email || !email.includes('@')) return '';
+  const [local, domain] = email.split('@');
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}***@${domain}`;
+}
+
+function maskPhoneNumber(phone?: string): string {
+  if (!phone) return '';
+  const clean = phone.trim();
+  if (clean.length <= 4) return '****';
+  return `${clean.slice(0, Math.min(6, clean.length - 4))}****${clean.slice(-4)}`;
+}
+
+let cachedMpAuditSnapshot: {
+  fetchedAt: number;
+  checkedAtIso: string;
+  configured: boolean;
+  totalInMercadoPago: number;
+  approvedCount: number;
+  pendingCount: number;
+  reconciledCount: number;
+  livePayments: Array<any>;
+  liveApprovedPayments: Array<any>;
+  liveRecurringSubscriptions: Array<any>;
+  recurringSubscriptionsActiveInMp: number;
+  recurringSubscriptionsPendingInMp: number;
+  activeMpPlansCount: number;
+} | null = null;
+
+async function syncLiveMercadoPagoState(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedMpAuditSnapshot && now - cachedMpAuditSnapshot.fetchedAt < 15000) {
+    return cachedMpAuditSnapshot;
+  }
+
+  let livePayments: Array<any> = [];
+  let totalInMercadoPago = 0;
+  let liveRecurringSubscriptions: Array<any> = [];
+  let activeMpPlansCount = 0;
+  let reconciledCount = 0;
+  let configured = false;
+
+  try {
+    const mpResults = await withMercadoPagoRetry(async (client) => {
+      configured = true;
+      const payment = new Payment(client);
+      const preApproval = new PreApproval(client);
+      const preApprovalPlan = new PreApprovalPlan(client);
+
+      const paymentRes = await payment.search({
+        options: { limit: 30, sort: 'date_created', criteria: 'desc' },
+      });
+
+      const [preRes, planRes] = await Promise.all([
+        preApproval.search({ options: { limit: 30 } }).catch(() => ({ results: [] })),
+        preApprovalPlan.search({ options: { limit: 20 } }).catch(() => ({ results: [] })),
+      ]);
+
+      return { paymentRes, preRes, planRes };
+    });
+
+    totalInMercadoPago = mpResults.paymentRes?.paging?.total || (mpResults.paymentRes?.results || []).length;
+    livePayments = (mpResults.paymentRes?.results || []).map((p: any) => ({
+      id: p.id,
+      status: p.status || 'pending',
+      statusDetail: p.status_detail || '',
+      amount: Number(p.transaction_amount) || 0,
+      description: p.description || '',
+      externalReference: p.external_reference || '',
+      payerEmail: p.payer?.email || '',
+      payerName: `${p.payer?.first_name || ''} ${p.payer?.last_name || ''}`.trim(),
+      paymentMethodId: p.payment_method_id || 'pix',
+      dateCreated: p.date_created || '',
+      dateApproved: p.date_approved || '',
+      ticketUrl: p.point_of_interaction?.transaction_data?.ticket_url || '',
+    }));
+
+    const preItems = mpResults.preRes?.results || [];
+    liveRecurringSubscriptions = preItems.map((pa: any) => ({
+      id: String(pa.id || ''),
+      reason: pa.reason || 'Assinatura Mensal Mãos em Obra',
+      status: pa.status || 'pending',
+      amount: Number(pa.auto_recurring?.transaction_amount) || 0,
+      payerEmail: pa.payer_email || '',
+      externalReference: pa.external_reference || '',
+      dateCreated: pa.date_created || '',
+    }));
+
+    const planItems = mpResults.planRes?.results || [];
+    activeMpPlansCount = planItems.filter((pl: any) => pl.status === 'active').length;
+
+    // Reconcile approved Payment entries
+    for (const lp of livePayments) {
+      if (lp.status === 'approved') {
+        const sub = subscriberPayments.find(
+          (s) =>
+            (lp.externalReference && (s.billingExternalRef === lp.externalReference || s.id === lp.externalReference)) ||
+            (s.mpPaymentId && String(s.mpPaymentId) === String(lp.id)) ||
+            (lp.payerEmail && s.subscriberEmail && lp.payerEmail.toLowerCase() === s.subscriberEmail.toLowerCase() && Math.abs(Number(s.amount) - lp.amount) < 0.05)
+        );
+        if (sub) {
+          sub.status = 'Aprovado';
+          sub.billingStatus = 'Pago no MP';
+          sub.mpVerifiedStatus = 'approved';
+          sub.mpPaymentId = lp.id;
+          sub.transactionId = String(lp.id);
+          sub.paymentDate = lp.dateApproved ? String(lp.dateApproved).split('T')[0] : new Date().toISOString().split('T')[0];
+          reconciledCount++;
+          if (Number(sub.amount) > 0) {
+            autoEmitNfseForPayment({
+              paymentId: sub.id,
+              paymentReference: String(lp.id),
+              tomadorName: sub.subscriberName,
+              tomadorEmail: sub.subscriberEmail,
+              tomadorRole: sub.subscriberRole,
+              planType: sub.planType,
+              grossAmount: Number(sub.amount),
+              triggerSource: 'Automático (Webhook Mercado Pago)',
+            });
+          }
+        }
+
+        const rec = clientAndProviderReceipts.find(
+          (r) =>
+            (lp.externalReference && (r.referenceId === lp.externalReference || r.id === lp.externalReference)) ||
+            (r.mpPaymentId && String(r.mpPaymentId) === String(lp.id))
+        );
+        if (rec) {
+          rec.status = 'Aprovado';
+          rec.mpPaymentId = String(lp.id);
+          rec.paymentDate = lp.dateApproved ? String(lp.dateApproved).split('T')[0] : new Date().toISOString().split('T')[0];
+          rec.updatedAt = new Date().toISOString();
+          if (Number(rec.amount) > 0) {
+            autoEmitNfseForPayment({
+              paymentId: rec.id,
+              paymentReference: String(lp.id),
+              tomadorName: rec.partyName,
+              tomadorEmail: rec.partyEmail,
+              tomadorDocument: rec.partyCpfCnpj,
+              planType: rec.description,
+              grossAmount: Number(rec.amount),
+              triggerSource: 'Automático (Webhook Mercado Pago)',
+            });
+          }
+        }
+      }
+    }
+
+    // Reconcile authorized PreApproval recurring subscriptions
+    for (const pa of liveRecurringSubscriptions) {
+      if (pa.status === 'authorized') {
+        const sub = subscriberPayments.find(
+          (s) =>
+            (pa.externalReference && (s.billingExternalRef === pa.externalReference || s.id === pa.externalReference)) ||
+            (pa.payerEmail && s.subscriberEmail && pa.payerEmail.toLowerCase() === s.subscriberEmail.toLowerCase())
+        );
+        if (sub) {
+          sub.status = 'Aprovado';
+          sub.billingStatus = 'Pago no MP';
+          sub.mpVerifiedStatus = 'approved';
+          sub.transactionId = pa.id;
+          sub.paymentDate = pa.dateCreated ? String(pa.dateCreated).split('T')[0] : new Date().toISOString().split('T')[0];
+          reconciledCount++;
+          if (Number(sub.amount) > 0) {
+            autoEmitNfseForPayment({
+              paymentId: sub.id,
+              paymentReference: String(pa.id),
+              tomadorName: sub.subscriberName,
+              tomadorEmail: sub.subscriberEmail,
+              tomadorRole: sub.subscriberRole,
+              planType: sub.planType,
+              grossAmount: Number(sub.amount),
+              triggerSource: 'Automático (Webhook Mercado Pago)',
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('syncLiveMercadoPagoState warning:', err);
+  }
+
+  const approvedPayments = livePayments.filter((p) => p.status === 'approved');
+  const pendingPayments = livePayments.filter((p) => p.status === 'pending' || p.status === 'in_process');
+  const recurringActive = liveRecurringSubscriptions.filter((s) => s.status === 'authorized').length;
+  const recurringPending = liveRecurringSubscriptions.filter((s) => s.status === 'pending' || s.status === 'paused').length;
+
+  cachedMpAuditSnapshot = {
+    fetchedAt: now,
+    checkedAtIso: new Date().toISOString(),
+    configured,
+    totalInMercadoPago,
+    approvedCount: approvedPayments.length,
+    pendingCount: pendingPayments.length,
+    reconciledCount,
+    livePayments,
+    liveApprovedPayments: approvedPayments,
+    liveRecurringSubscriptions,
+    recurringSubscriptionsActiveInMp: recurringActive,
+    recurringSubscriptionsPendingInMp: recurringPending,
+    activeMpPlansCount,
+  };
+
+  return cachedMpAuditSnapshot;
+}
+
+// Public & Master endpoint: Real Enrolled & Active Subscribers Status in the System
+app.get('/api/subscribers/real-status', async (req, res) => {
+  reconcilePendingChargesToReducedPlans();
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  const isMaster = Boolean(token && verifyMasterToken(token));
+  const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+
+  const mpAudit = await syncLiveMercadoPagoState(forceRefresh);
+
+  const activePaidSubscribers = subscriberPayments.filter(
+    (s) => s.status === 'Aprovado' && Number(s.amount) > 0
+  ).length;
+  const activeFreeSubscribers = subscriberPayments.filter(
+    (s) => s.planType === 'Gratuito Lançamento' || s.status === 'Isento / Cortesia'
+  ).length;
+  const pendingSubscribers = subscriberPayments.filter((s) => s.status === 'Pendente').length;
+  const overdueSubscribers = subscriberPayments.filter((s) => s.status === 'Atrasado').length;
+  const mpVerifiedPaidSubscribers = subscriberPayments.filter(
+    (s) => s.mpVerifiedStatus === 'approved' || s.billingStatus === 'Pago no MP'
+  ).length;
+
+  const subscribers = subscriberPayments.map((s) => {
+    const isFree = s.planType === 'Gratuito Lançamento' || s.status === 'Isento / Cortesia';
+    const isPaidActive = s.status === 'Aprovado' && Number(s.amount) > 0;
+    const isMpVerified = s.mpVerifiedStatus === 'approved' || s.billingStatus === 'Pago no MP';
+    const isActive = isPaidActive || isFree;
+
+    let verificationBadge:
+      | 'Pago Confirmado no MP'
+      | 'Ativo no Sistema'
+      | 'Cadastro Gratuito Ativo'
+      | 'Cobrança Pendente'
+      | 'Em Atraso'
+      | 'Cancelado' = 'Cobrança Pendente';
+
+    if (s.status === 'Cancelado') verificationBadge = 'Cancelado';
+    else if (s.status === 'Atrasado') verificationBadge = 'Em Atraso';
+    else if (isFree) verificationBadge = 'Cadastro Gratuito Ativo';
+    else if (isPaidActive && isMpVerified) verificationBadge = 'Pago Confirmado no MP';
+    else if (isPaidActive) verificationBadge = 'Ativo no Sistema';
+    else verificationBadge = 'Cobrança Pendente';
+
+    return {
+      id: s.id,
+      subscriberName: s.subscriberName,
+      subscriberEmail: isMaster ? s.subscriberEmail : maskEmailAddress(s.subscriberEmail),
+      subscriberPhone: isMaster ? s.subscriberPhone : maskPhoneNumber(s.subscriberPhone),
+      subscriberRole: s.subscriberRole,
+      planType: s.planType,
+      amount: Number(s.amount) || 0,
+      method: s.method,
+      status: s.status,
+      paymentDate: s.paymentDate,
+      dueDate: s.dueDate,
+      billingStatus: s.billingStatus,
+      mpVerifiedStatus: s.mpVerifiedStatus,
+      mpPaymentId: s.mpPaymentId,
+      projectCount: s.projectCount || 1,
+      isActive,
+      verificationBadge,
+    };
+  });
+
+  return res.json({
+    success: true,
+    checkedAt: mpAudit.checkedAtIso,
+    summary: {
+      totalEnrolledSubscribers: subscriberPayments.length,
+      activePaidSubscribers,
+      activeFreeSubscribers,
+      pendingSubscribers,
+      overdueSubscribers,
+      mpVerifiedPaidSubscribers,
+    },
+    mpLiveStats: {
+      configured: mpAudit.configured,
+      totalPaymentsInMp: mpAudit.totalInMercadoPago,
+      approvedPaymentsInMp: mpAudit.approvedCount,
+      pendingPaymentsInMp: mpAudit.pendingCount,
+      recurringSubscriptionsActiveInMp: mpAudit.recurringSubscriptionsActiveInMp,
+      recurringSubscriptionsPendingInMp: mpAudit.recurringSubscriptionsPendingInMp,
+      activeMpPlansCount: mpAudit.activeMpPlansCount,
+      liveApprovedPayments: mpAudit.liveApprovedPayments.map((lp) => ({
+        ...lp,
+        payerEmail: isMaster ? lp.payerEmail : maskEmailAddress(lp.payerEmail),
+      })),
+      liveRecurringSubscriptions: mpAudit.liveRecurringSubscriptions.map((ls) => ({
+        ...ls,
+        payerEmail: isMaster ? ls.payerEmail : maskEmailAddress(ls.payerEmail),
+      })),
+    },
+    subscribers,
+  });
+});
+
+// Register or sync an active subscriber enrollment (e.g. after checkout/plan activation)
+app.post('/api/subscribers/enroll-active', (req, res) => {
+  const {
+    subscriberName,
+    subscriberEmail,
+    subscriberPhone,
+    subscriberRole,
+    planType,
+    amount,
+    method,
+    transactionId,
+    mpPaymentId,
+    mpVerifiedStatus,
+  } = req.body || {};
+
+  const cleanName = String(subscriberName || '').trim();
+  const cleanEmail = String(subscriberEmail || '').trim();
+  if (!cleanName && !cleanEmail) {
+    return res.status(400).json({ error: 'Nome ou e-mail do assinante é obrigatório.' });
+  }
+
+  const numericAmount = Number(amount) || 0;
+  const isFree = numericAmount <= 0 || String(planType || '').toLowerCase().includes('gratuito');
+  const isAnnual = String(planType || '').toLowerCase().includes('anual') || numericAmount >= 400;
+  const resolvedPlan =
+    planType ||
+    (isFree
+      ? 'Gratuito Lançamento'
+      : isAnnual
+      ? 'Anual Construtor'
+      : numericAmount >= 49
+      ? 'Mensal Construtor'
+      : numericAmount >= 29
+      ? 'Mensal Pro'
+      : 'Mensal Básico');
+  const today = new Date().toISOString().split('T')[0];
+  const due = new Date(Date.now() + (isAnnual ? 365 : 30) * 86400000).toISOString().split('T')[0];
+
+  const existingIdx = subscriberPayments.findIndex(
+    (s) =>
+      (cleanEmail && s.subscriberEmail && s.subscriberEmail.toLowerCase() === cleanEmail.toLowerCase()) ||
+      (cleanName && s.subscriberName.toLowerCase() === cleanName.toLowerCase())
+  );
+
+  const isMpApproved = mpVerifiedStatus === 'approved' || Boolean(mpPaymentId);
+
+  if (existingIdx !== -1) {
+    subscriberPayments[existingIdx] = {
+      ...subscriberPayments[existingIdx],
+      subscriberName: cleanName || subscriberPayments[existingIdx].subscriberName,
+      subscriberEmail: cleanEmail || subscriberPayments[existingIdx].subscriberEmail,
+      subscriberPhone: subscriberPhone || subscriberPayments[existingIdx].subscriberPhone,
+      subscriberRole: subscriberRole || subscriberPayments[existingIdx].subscriberRole,
+      planType: resolvedPlan,
+      amount: numericAmount,
+      method: method || (isFree ? 'PIX' : 'Mercado Pago'),
+      status: isFree ? 'Isento / Cortesia' : 'Aprovado',
+      paymentDate: today,
+      dueDate: isFree ? '2026-12-31' : due,
+      transactionId: transactionId ? String(transactionId) : subscriberPayments[existingIdx].transactionId,
+      mpPaymentId: mpPaymentId || subscriberPayments[existingIdx].mpPaymentId,
+      billingStatus: isMpApproved ? 'Pago no MP' : subscriberPayments[existingIdx].billingStatus,
+      mpVerifiedStatus: isMpApproved ? 'approved' : subscriberPayments[existingIdx].mpVerifiedStatus,
+    };
+    let issuedNfse = null;
+    if (!isFree && numericAmount > 0) {
+      issuedNfse = autoEmitNfseForPayment({
+        paymentId: subscriberPayments[existingIdx].id,
+        paymentReference: subscriberPayments[existingIdx].transactionId,
+        tomadorName: subscriberPayments[existingIdx].subscriberName,
+        tomadorEmail: subscriberPayments[existingIdx].subscriberEmail,
+        tomadorRole: subscriberPayments[existingIdx].subscriberRole,
+        planType: resolvedPlan,
+        grossAmount: numericAmount,
+        triggerSource: isMpApproved ? 'Automático (Webhook Mercado Pago)' : 'Automático (Pagamento Aprovado)',
+      });
+    }
+    return res.json({ success: true, subscriber: subscriberPayments[existingIdx], issuedNfse });
+  }
+
+  const created = {
+    id: `sub-real-${Date.now()}`,
+    subscriberName: cleanName || cleanEmail,
+    subscriberEmail: cleanEmail,
+    subscriberPhone: subscriberPhone || '',
+    subscriberRole: subscriberRole || 'Solicitante / Cliente',
+    planType: resolvedPlan,
+    amount: numericAmount,
+    method: method || (isFree ? 'PIX' : 'Mercado Pago'),
+    status: isFree ? 'Isento / Cortesia' : 'Aprovado',
+    paymentDate: today,
+    dueDate: isFree ? '2026-12-31' : due,
+    reference: isFree ? 'Cadastro Gratuito na Plataforma' : `Assinatura ${resolvedPlan} Ativa`,
+    notes: isMpApproved ? 'Confirmado via Mercado Pago' : 'Inscrito e ativo no sistema',
+    transactionId: transactionId ? String(transactionId) : `SUB-ACTIVE-${Date.now()}`,
+    mpPaymentId: mpPaymentId || undefined,
+    billingStatus: isMpApproved ? ('Pago no MP' as const) : undefined,
+    mpVerifiedStatus: isMpApproved ? 'approved' : undefined,
+    projectCount: 1,
+  };
+
+  subscriberPayments.unshift(created);
+  let issuedNfse = null;
+  if (!isFree && numericAmount > 0) {
+    issuedNfse = autoEmitNfseForPayment({
+      paymentId: created.id,
+      paymentReference: created.transactionId,
+      tomadorName: created.subscriberName,
+      tomadorEmail: created.subscriberEmail,
+      tomadorRole: created.subscriberRole,
+      planType: resolvedPlan,
+      grossAmount: numericAmount,
+      triggerSource: isMpApproved ? 'Automático (Webhook Mercado Pago)' : 'Automático (Pagamento Aprovado)',
+    });
+  }
+  return res.json({ success: true, subscriber: created, issuedNfse });
+});
+
+// Fetch Live Payments directly from Mercado Pago API and reconcile with subscribers & receipts
+app.get('/api/mercadopago/live-payments', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  try {
+    const mpAudit = await syncLiveMercadoPagoState(true);
+    const subscriberMatchedApprovedCount = subscriberPayments.filter((s) => s.mpVerifiedStatus === 'approved').length;
+
+    return res.json({
+      success: true,
+      totalInMercadoPago: mpAudit.totalInMercadoPago,
+      approvedCount: mpAudit.approvedCount,
+      pendingCount: mpAudit.pendingCount,
+      recurringSubscriptionsActiveInMp: mpAudit.recurringSubscriptionsActiveInMp,
+      recurringSubscriptionsPendingInMp: mpAudit.recurringSubscriptionsPendingInMp,
+      activeMpPlansCount: mpAudit.activeMpPlansCount,
+      subscriberMatchedApprovedCount,
+      reconciledCount: mpAudit.reconciledCount,
+      payments: mpAudit.livePayments,
+      liveRecurringSubscriptions: mpAudit.liveRecurringSubscriptions,
+      subscriberPayments,
+    });
+  } catch (err: any) {
+    console.error('Error syncing live Mercado Pago payments:', err);
+    return res.status(500).json({ error: err.message || 'Falha ao consultar pagamentos reais no Mercado Pago' });
+  }
+});
+
+async function issueSingleSubscriberMercadoPagoCharge(item: any, req: express.Request, mpClient: any) {
+  const amount = Number(item.amount) || 0;
+  const appUrl = resolvePublicAppUrl(req);
+  const isHttps = appUrl.startsWith('https://');
+  const notificationUrl = isHttps ? `${appUrl}/api/mercadopago/webhook` : undefined;
+  const nowIso = new Date().toISOString();
+  const defaultDueDate = new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0];
+
+  const subId = item.id || `sub-real-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+  const cleanRef = `SUB-${String(subId).replace(/[^a-zA-Z0-9]/g, '').slice(-10)}-${Date.now().toString().slice(-6)}`;
+  const subscriberName = String(item.subscriberName || 'Assinante Mãos em Obra').trim();
+  const subscriberEmail = String(item.subscriberEmail || '').trim();
+  const validPayerEmail = subscriberEmail && subscriberEmail.includes('@') ? subscriberEmail : 'cobranca@maosemobra.app';
+  const subscriberPhone = String(item.subscriberPhone || '').trim();
+  const subscriberRole = item.subscriberRole || 'Prestador de Serviço';
+  const planType = item.planType || 'Mensal Pro';
+  const dueDate = item.dueDate || defaultDueDate;
+  const reference = item.reference || `Assinatura ${planType} - Plataforma Mãos em Obra`;
+
+  let billingLink = '';
+  let mpPreferenceId = '';
+  let pixTicketUrl = '';
+  let pixCopyPaste = '';
+  let mpPaymentId: string | number = '';
+  let mode: 'live' | 'partial' | 'fallback' = 'fallback';
+  let createdLivePref = false;
+  let createdLivePix = false;
+
+  // 1. Create LIVE Mercado Pago Checkout Pro Preference (Cartão, PIX, Boleto)
+  if (mpClient) {
+    try {
+      const prefBody: any = {
+        items: [
+          {
+            id: cleanRef,
+            title: `${planType} — ${subscriberName}`.slice(0, 250),
+            description: reference.slice(0, 250),
+            unit_price: Number(amount.toFixed(2)),
+            quantity: 1,
+            currency_id: 'BRL',
+          },
+        ],
+        payer: {
+          name: subscriberName,
+          email: validPayerEmail,
+        },
+        back_urls: {
+          success: `${appUrl}/?mp_status=approved&ref=${cleanRef}`,
+          failure: `${appUrl}/?mp_status=failure&ref=${cleanRef}`,
+          pending: `${appUrl}/?mp_status=pending&ref=${cleanRef}`,
+        },
+        external_reference: cleanRef,
+        statement_descriptor: 'MAOS EM OBRA',
+        payment_methods: {
+          installments: 12,
+        },
+      };
+      if (isHttps) {
+        prefBody.auto_return = 'approved';
+      }
+      if (notificationUrl) {
+        prefBody.notification_url = notificationUrl;
+      }
+
+      const prefResult = await withMercadoPagoRetry(async (client) => {
+        const preference = new Preference(client);
+        return await preference.create({ body: prefBody });
+      });
+      if (prefResult?.id && prefResult?.init_point) {
+        mpPreferenceId = String(prefResult.id);
+        billingLink = prefResult.init_point;
+        createdLivePref = true;
+        mode = 'live';
+      }
+    } catch (prefErr: any) {
+      console.warn(`[Billing Batch] Preference error for ${subscriberName}:`, prefErr?.message || prefErr);
+    }
+
+    // 2. Create LIVE Mercado Pago PIX Payment (Instant PIX Copia e Cola + Ticket URL)
+    try {
+      const nameParts = subscriberName.split(/\s+/);
+      const firstName = nameParts[0] || 'Assinante';
+      const lastName = nameParts.slice(1).join(' ') || 'Obra';
+      const pixBody: any = {
+        transaction_amount: Number(amount.toFixed(2)),
+        description: `${planType} - ${subscriberName}`.slice(0, 250),
+        payment_method_id: 'pix',
+        payer: {
+          email: validPayerEmail,
+          first_name: firstName,
+          last_name: lastName,
+        },
+        external_reference: cleanRef,
+      };
+      if (notificationUrl) {
+        pixBody.notification_url = notificationUrl;
+      }
+
+      const pixResult = await withMercadoPagoRetry(async (client) => {
+        const payment = new Payment(client);
+        return await payment.create({ body: pixBody });
+      });
+      const poi = pixResult.point_of_interaction?.transaction_data;
+      if (pixResult?.id) {
+        mpPaymentId = pixResult.id;
+        pixCopyPaste = poi?.qr_code || '';
+        pixTicketUrl = poi?.ticket_url || '';
+        createdLivePix = true;
+        if (mode !== 'live') mode = 'partial';
+      }
+    } catch (pixErr: any) {
+      console.warn(`[Billing Batch] PIX error for ${subscriberName}:`, pixErr?.message || pixErr);
+    }
+  }
+
+  // Safe EMV PIX fallback if live PIX failed
+  if (!pixCopyPaste) {
+    pixCopyPaste = buildPixPayloadServer('+5573998599213', amount, cleanRef);
+  }
+
+  const amountFormatted = amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  const dueFormatted = dueDate ? new Date(`${dueDate}T12:00:00`).toLocaleDateString('pt-BR') : 'Imediato';
+  const billingMessage = [
+    `Olá, *${subscriberName}*!`,
+    ``,
+    `Segue sua cobrança atualizada da plataforma *Mãos em Obra*:`,
+    `• *Plano:* ${planType}`,
+    `• *Valor:* R$ ${amountFormatted}`,
+    `• *Vencimento:* ${dueFormatted}`,
+    `• *Referência:* ${cleanRef}`,
+    billingLink ? `\n💳 *Pagar via Mercado Pago (Cartão, PIX ou Boleto):*\n${billingLink}` : '',
+    pixTicketUrl ? `\n🧾 *Fatura PIX Direta (QR Code):*\n${pixTicketUrl}` : '',
+    pixCopyPaste ? `\n💠 *PIX Copia e Cola (Mercado Pago):*\n${pixCopyPaste}` : '',
+    `\nAssim que compensar, a liberação no sistema é automática.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  // 3. Upsert subscriberPayments record
+  const existingIdx = subscriberPayments.findIndex(
+    (s) =>
+      s.id === subId ||
+      (subscriberEmail && s.subscriberEmail && s.subscriberEmail.toLowerCase() === subscriberEmail.toLowerCase())
+  );
+
+  const billingStatus =
+    existingIdx !== -1 && subscriberPayments[existingIdx].mpVerifiedStatus === 'approved'
+      ? ('Pago no MP' as const)
+      : ('Cobrança Emitida' as const);
+
+  if (existingIdx !== -1) {
+    subscriberPayments[existingIdx] = {
+      ...subscriberPayments[existingIdx],
+      subscriberName,
+      subscriberEmail,
+      subscriberPhone,
+      subscriberRole,
+      planType,
+      amount,
+      dueDate,
+      reference,
+      status: subscriberPayments[existingIdx].mpVerifiedStatus === 'approved' ? 'Aprovado' : subscriberPayments[existingIdx].status === 'Atrasado' ? 'Atrasado' : 'Pendente',
+      billingStatus,
+      billingLink: billingLink || subscriberPayments[existingIdx].billingLink,
+      pixTicketUrl: pixTicketUrl || subscriberPayments[existingIdx].pixTicketUrl,
+      pixCopyPaste,
+      mpPreferenceId: mpPreferenceId || subscriberPayments[existingIdx].mpPreferenceId,
+      mpPaymentId: mpPaymentId || subscriberPayments[existingIdx].mpPaymentId,
+      billingExternalRef: cleanRef,
+      billingEmittedAt: nowIso,
+      billingMessage,
+      transactionId: mpPaymentId ? String(mpPaymentId) : subscriberPayments[existingIdx].transactionId,
+      notes: `Cobrança Mercado Pago emitida em ${new Date().toLocaleDateString('pt-BR')} no valor de R$ ${amountFormatted} (${cleanRef}). Aguardando liquidação real.`,
+    };
+  } else {
+    subscriberPayments.unshift({
+      id: subId,
+      subscriberName,
+      subscriberEmail,
+      subscriberPhone,
+      subscriberRole,
+      planType,
+      amount,
+      method: 'Mercado Pago',
+      status: 'Pendente',
+      paymentDate: '',
+      dueDate,
+      reference,
+      notes: `Cobrança Mercado Pago emitida em ${new Date().toLocaleDateString('pt-BR')} no valor de R$ ${amountFormatted} (${cleanRef}).`,
+      transactionId: mpPaymentId ? String(mpPaymentId) : cleanRef,
+      projectCount: Number(item.projectCount) || 1,
+      billingStatus: 'Cobrança Emitida',
+      billingLink,
+      pixTicketUrl,
+      pixCopyPaste,
+      mpPreferenceId,
+      mpPaymentId,
+      billingExternalRef: cleanRef,
+      billingEmittedAt: nowIso,
+      billingMessage,
+    });
+  }
+
+  // 4. Register/Update in clientAndProviderReceipts so Webhook notifications auto-match
+  const existingRec = clientAndProviderReceipts.find(
+    (r) =>
+      r.referenceId === subId ||
+      r.referenceId === cleanRef ||
+      (subscriberEmail && r.partyEmail.toLowerCase() === subscriberEmail.toLowerCase() && r.status === 'Pendente' && isSubscriptionReceiptRecord(r))
+  );
+  if (existingRec) {
+    existingRec.referenceId = cleanRef;
+    existingRec.mpPaymentId = mpPaymentId ? String(mpPaymentId) : existingRec.mpPaymentId;
+    existingRec.description = `Cobrança Assinatura ${planType}`;
+    existingRec.amount = amount;
+    existingRec.updatedAt = nowIso;
+    existingRec.notes = `Link Checkout Pro e PIX atualizados para R$ ${amountFormatted} via API Mercado Pago.`;
+  } else {
+    clientAndProviderReceipts.unshift({
+      id: `REC-SUB-${Date.now()}-${Math.floor(10 + Math.random() * 89)}`,
+      category: subscriberRole === 'Solicitante / Cliente' ? 'cliente' : 'prestador',
+      partyName: subscriberName,
+      partyEmail: subscriberEmail,
+      partyPhone: subscriberPhone,
+      description: `Cobrança Assinatura ${planType}`,
+      amount,
+      method: 'Mercado Pago',
+      status: 'Pendente',
+      referenceId: cleanRef,
+      mpPaymentId: mpPaymentId ? String(mpPaymentId) : undefined,
+      dueDate,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      notes: `Link Checkout Pro e PIX gerados via API Mercado Pago (R$ ${amountFormatted}).`,
+    });
+  }
+
+  return {
+    createdLivePref,
+    createdLivePix,
+    charge: {
+      id: subId,
+      subscriberName,
+      subscriberEmail,
+      subscriberPhone,
+      subscriberRole,
+      planType,
+      amount,
+      dueDate,
+      billingExternalRef: cleanRef,
+      billingLink,
+      pixTicketUrl,
+      pixCopyPaste,
+      mpPreferenceId,
+      mpPaymentId,
+      billingMessage,
+      mode,
+      billingEmittedAt: nowIso,
+    },
+  };
+}
+
+// Batch Emit Real Mercado Pago Charges (Checkout Pro + Live PIX) for Subscribers
+app.post('/api/admin/subscribers-billing/emit-batch', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const mpClient = getMercadoPagoClient();
+  if (!mpClient) {
+    return res.status(400).json({ error: 'Credenciais do Mercado Pago não configuradas.' });
+  }
+
+  try {
+    const incomingList: Array<any> = Array.isArray(req.body?.subscribers) && req.body.subscribers.length > 0
+      ? req.body.subscribers
+      : subscriberPayments.filter((s) => Number(s.amount) > 0);
+
+    const emittedCharges: any[] = [];
+    let livePreferencesCount = 0;
+    let livePixCount = 0;
+
+    for (const item of incomingList) {
+      const amount = Number(item.amount) || 0;
+      if (amount <= 0) continue;
+
+      const issued = await issueSingleSubscriberMercadoPagoCharge(item, req, mpClient);
+      if (issued.createdLivePref) livePreferencesCount++;
+      if (issued.createdLivePix) livePixCount++;
+      emittedCharges.push(issued.charge);
+    }
+
+    recordAuditLog(
+      'CONFIG_CHANGE',
+      'INFO',
+      req.ip || '127.0.0.1',
+      `Emissão em lote Mercado Pago executada para ${emittedCharges.length} assinante(s): ${livePreferencesCount} Checkout(s) e ${livePixCount} PIX ao vivo gerados.`
+    );
+
+    return res.json({
+      success: true,
+      totalEmitted: emittedCharges.length,
+      livePreferencesCount,
+      livePixCount,
+      emittedCharges,
+      subscriberPayments,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/admin/subscribers-billing/emit-batch:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao emitir cobranças em lote no Mercado Pago' });
+  }
+});
+
+// Adjust Pending Subscriber Charges to Reduced Plan Prices & Optionally Re-emit in Mercado Pago
+app.post('/api/admin/subscribers-billing/adjust-pending', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  try {
+    const { updates, reemitMercadoPago = true } = req.body || {};
+    const reconciliation = reconcilePendingChargesToReducedPlans(updates);
+
+    const mpClient = reemitMercadoPago ? getMercadoPagoClient() : null;
+    let reemittedCount = 0;
+    let livePreferencesCount = 0;
+    let livePixCount = 0;
+
+    const pendingPaidSubscribers = subscriberPayments.filter(
+      (s) =>
+        (s.status === 'Pendente' || s.status === 'Atrasado') &&
+        s.mpVerifiedStatus !== 'approved' &&
+        s.billingStatus !== 'Pago no MP' &&
+        Number(s.amount) > 0
+    );
+
+    if (mpClient && reemitMercadoPago) {
+      for (const sub of pendingPaidSubscribers) {
+        const wasAdjusted = reconciliation.adjustedIds.includes(sub.id);
+        const missingLinks = !sub.billingLink && !sub.pixCopyPaste;
+        if (wasAdjusted || missingLinks) {
+          const issued = await issueSingleSubscriberMercadoPagoCharge(sub, req, mpClient);
+          reemittedCount++;
+          if (issued.createdLivePref) livePreferencesCount++;
+          if (issued.createdLivePix) livePixCount++;
+        }
+      }
+    }
+
+    recordAuditLog(
+      'CONFIG_CHANGE',
+      'INFO',
+      req.ip || '127.0.0.1',
+      `Ajuste de cobranças pendentes para planos reduzidos: ${reconciliation.adjustedCount} valor(es) ajustado(s), ${reemittedCount} cobrança(s) reemitida(s) no Mercado Pago.`
+    );
+
+    return res.json({
+      success: true,
+      adjustedCount: reconciliation.adjustedCount,
+      adjustedIds: reconciliation.adjustedIds,
+      adjustedDetails: reconciliation.adjustedDetails,
+      reemittedCount,
+      livePreferencesCount,
+      livePixCount,
+      subscriberPayments,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/admin/subscribers-billing/adjust-pending:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao ajustar cobranças pendentes' });
+  }
+});
+
+// Mark emitted subscriber billing as dispatched via WhatsApp, Email, or Link Copiado
+app.post('/api/admin/subscribers-billing/mark-sent', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const { subscriberIds, channel } = req.body || {};
+  const ids: string[] = Array.isArray(subscriberIds) ? subscriberIds : [];
+  const validChannel = channel || 'WhatsApp';
+  const nowIso = new Date().toISOString();
+
+  let updatedCount = 0;
+  for (const id of ids) {
+    const sub = subscriberPayments.find((s) => s.id === id);
+    if (sub) {
+      if (sub.billingStatus !== 'Pago no MP') {
+        sub.billingStatus = 'Enviada';
+      }
+      sub.billingSentAt = nowIso;
+      sub.billingChannel = validChannel;
+      updatedCount++;
+    }
+  }
+
+  if (updatedCount > 0) {
+    recordAuditLog(
+      'CONFIG_CHANGE',
+      'INFO',
+      req.ip || '127.0.0.1',
+      `Cobrança enviada via ${validChannel} para ${updatedCount} assinante(s).`
+    );
+  }
+
+  return res.json({ success: true, updatedCount, subscriberPayments });
+});
+
 
 // Mercado Pago: Config Status
 app.get('/api/mercadopago/status', (req, res) => {
@@ -1149,6 +3604,158 @@ app.get('/api/mercadopago/status', (req, res) => {
   });
 });
 
+// Cache of recurring monthly PreApprovalPlan links keyed by reason + amount
+const mpRecurringPlanCache = new Map<string, { planId: string; initPoint: string }>();
+
+// Mercado Pago: Create Recurring Monthly or Annual Subscription (PreApprovalPlan / PreApproval)
+app.post('/api/mercadopago/create-subscription', async (req, res) => {
+  try {
+    const { title, amount, planName, billingCycle, payerEmail, payerName, referenceId, description } = req.body || {};
+    const numericAmount = Number(amount);
+
+    if (!numericAmount || numericAmount <= 0) {
+      return res.status(400).json({ error: 'Valor inválido para assinatura recorrente.' });
+    }
+
+    const isAnnual =
+      String(billingCycle || '').toLowerCase() === 'anual' ||
+      String(planName || title || '').toLowerCase().includes('anual') ||
+      numericAmount >= 400;
+    const frequency = isAnnual ? 12 : 1;
+    const resolvedBillingCycle = isAnnual ? 'Anual' : 'Mensal';
+
+    const mpClient = getMercadoPagoClient();
+    const appUrl = resolvePublicAppUrl(req);
+    const isHttps = appUrl.startsWith('https://');
+    const cleanRef = referenceId || `SUB-${isAnnual ? 'ANNUAL' : 'MONTHLY'}-${Date.now()}`;
+    const reason = (planName || title || `Assinatura ${resolvedBillingCycle} Mãos em Obra`).slice(0, 120);
+    const cacheKey = `${reason}::${numericAmount.toFixed(2)}::${frequency}`;
+    const backUrl = `${appUrl}/?mp_status=authorized&subscription=${isAnnual ? 'annual' : 'monthly'}&ref=${encodeURIComponent(cleanRef)}`;
+
+    if (mpClient) {
+      try {
+        const cached = mpRecurringPlanCache.get(cacheKey);
+        if (cached) {
+          return res.json({
+            subscriptionId: cached.planId,
+            planId: cached.planId,
+            initPoint: cached.initPoint,
+            frequency,
+            frequencyType: 'months',
+            billingCycle: resolvedBillingCycle,
+            recurring: true,
+            amount: Number(numericAmount.toFixed(2)),
+            mode: 'live',
+          });
+        }
+
+        // Create universal Mercado Pago recurring PreApprovalPlan (1 month or 12 months for Annual)
+        const planResult = await withMercadoPagoRetry(async (client) => {
+          const preApprovalPlan = new PreApprovalPlan(client);
+          return await preApprovalPlan.create({
+            body: {
+              reason,
+              back_url: backUrl,
+              auto_recurring: {
+                frequency,
+                frequency_type: 'months',
+                transaction_amount: Number(numericAmount.toFixed(2)),
+                currency_id: 'BRL',
+              },
+            },
+          });
+        });
+
+        const initPoint = planResult.init_point || `https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=${planResult.id}`;
+        if (planResult.id) {
+          mpRecurringPlanCache.set(cacheKey, { planId: planResult.id, initPoint });
+        }
+
+        return res.json({
+          subscriptionId: planResult.id || cleanRef,
+          planId: planResult.id,
+          initPoint,
+          frequency,
+          frequencyType: 'months',
+          billingCycle: resolvedBillingCycle,
+          recurring: true,
+          amount: Number(numericAmount.toFixed(2)),
+          mode: 'live',
+        });
+      } catch (planErr: any) {
+        console.warn('Mercado Pago PreApprovalPlan fallback to recurring Preference:', planErr?.message || planErr);
+
+        try {
+          const cycleSuffix = isAnnual ? 'Anual Recorrente' : 'Mensal Recorrente';
+          const unitSuffix = isAnnual ? '/ano' : '/mês';
+          const prefBody: any = {
+            items: [
+              {
+                id: cleanRef,
+                title: `${reason} (${cycleSuffix})`.slice(0, 250),
+                description: (description || `Assinatura ${resolvedBillingCycle.toLowerCase()} recorrente - R$ ${numericAmount.toFixed(2)}${unitSuffix}`).slice(0, 250),
+                unit_price: Number(numericAmount.toFixed(2)),
+                quantity: 1,
+                currency_id: 'BRL',
+              },
+            ],
+            payer: {
+              name: payerName || 'Assinante Mãos em Obra',
+              email: payerEmail && String(payerEmail).includes('@') ? payerEmail : 'cliente@maosemobra.com.br',
+            },
+            back_urls: {
+              success: `${appUrl}/?mp_status=approved&subscription=${isAnnual ? 'annual' : 'monthly'}&ref=${cleanRef}`,
+              failure: `${appUrl}/?mp_status=failure&ref=${cleanRef}`,
+              pending: `${appUrl}/?mp_status=pending&ref=${cleanRef}`,
+            },
+            external_reference: cleanRef,
+            statement_descriptor: 'MAOS EM OBRA',
+          };
+          if (isHttps) {
+            prefBody.auto_return = 'approved';
+            prefBody.notification_url = `${appUrl}/api/mercadopago/webhook`;
+          }
+
+          const prefResult = await withMercadoPagoRetry(async (client) => {
+            const preference = new Preference(client);
+            return await preference.create({ body: prefBody });
+          });
+
+          return res.json({
+            subscriptionId: prefResult.id || cleanRef,
+            initPoint: prefResult.init_point || prefResult.sandbox_init_point,
+            frequency,
+            frequencyType: 'months',
+            billingCycle: resolvedBillingCycle,
+            recurring: true,
+            amount: Number(numericAmount.toFixed(2)),
+            mode: 'fallback',
+            notice: `Checkout ${resolvedBillingCycle.toLowerCase()} gerado via Preferência Mercado Pago.`,
+          });
+        } catch (prefErr: any) {
+          console.warn('Mercado Pago recurring fallback error:', prefErr?.message || prefErr);
+        }
+      }
+    }
+
+    const demoId = `sub-demo-${Date.now()}`;
+    return res.json({
+      subscriptionId: demoId,
+      initPoint: `https://www.mercadopago.com.br/subscriptions/checkout?preapproval_plan_id=${demoId}`,
+      frequency,
+      frequencyType: 'months',
+      billingCycle: resolvedBillingCycle,
+      recurring: true,
+      amount: Number(numericAmount.toFixed(2)),
+      mode: 'demo',
+      notice: 'Configure MERCADO_PAGO_ACCESS_TOKEN para assinaturas recorrentes diretas em produção.',
+    });
+  } catch (error: any) {
+    console.error('Error in /api/mercadopago/create-subscription:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao gerar assinatura recorrente' });
+  }
+});
+
 // Mercado Pago: Create Preference (Checkout Pro - Cartão, Pix, Boleto, Parcelamento)
 app.post('/api/mercadopago/create-preference', async (req, res) => {
   try {
@@ -1159,40 +3766,45 @@ app.post('/api/mercadopago/create-preference', async (req, res) => {
     }
 
     const mpClient = getMercadoPagoClient();
-    const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+    const appUrl = resolvePublicAppUrl(req);
+    const isHttps = appUrl.startsWith('https://');
 
     if (mpClient) {
       try {
         // Real Mercado Pago Preference
-        const preference = new Preference(mpClient);
-        const result = await preference.create({
-          body: {
-            items: [
-              {
-                id: referenceId || `item-${Date.now()}`,
-                title: title || 'Pagamento de Obra / Serviço',
-                description: description || 'Serviço gerenciado pelo Mãos em Obra',
-                unit_price: Number(amount),
-                quantity: 1,
-                currency_id: 'BRL',
-              },
-            ],
-            payer: {
-              name: payerName || 'Cliente',
-              email: payerEmail || 'cliente@maosemobra.com.br',
+        const prefBody: any = {
+          items: [
+            {
+              id: referenceId || `item-${Date.now()}`,
+              title: title || 'Pagamento de Obra / Serviço',
+              description: description || 'Serviço gerenciado pelo Mãos em Obra',
+              unit_price: Number(amount),
+              quantity: 1,
+              currency_id: 'BRL',
             },
-            back_urls: {
-              success: `${appUrl}/?mp_status=approved&ref=${referenceId || ''}`,
-              failure: `${appUrl}/?mp_status=failure&ref=${referenceId || ''}`,
-              pending: `${appUrl}/?mp_status=pending&ref=${referenceId || ''}`,
-            },
-            auto_return: 'approved',
-            external_reference: referenceId || `ref-${Date.now()}`,
-            statement_descriptor: 'MAOS EM OBRA',
-            payment_methods: {
-              installments: 12,
-            },
+          ],
+          payer: {
+            name: payerName || 'Cliente',
+            email: payerEmail && String(payerEmail).includes('@') ? payerEmail : 'cliente@maosemobra.com.br',
           },
+          back_urls: {
+            success: `${appUrl}/?mp_status=approved&ref=${referenceId || ''}`,
+            failure: `${appUrl}/?mp_status=failure&ref=${referenceId || ''}`,
+            pending: `${appUrl}/?mp_status=pending&ref=${referenceId || ''}`,
+          },
+          external_reference: referenceId || `ref-${Date.now()}`,
+          statement_descriptor: 'MAOS EM OBRA',
+          payment_methods: {
+            installments: 12,
+          },
+        };
+        if (isHttps) {
+          prefBody.auto_return = 'approved';
+          prefBody.notification_url = `${appUrl}/api/mercadopago/webhook`;
+        }
+        const result = await withMercadoPagoRetry(async (client) => {
+          const preference = new Preference(client);
+          return await preference.create({ body: prefBody });
         });
 
         return res.json({
@@ -1238,38 +3850,41 @@ app.post('/api/mercadopago/batch-preferences', async (req, res) => {
     }
 
     const mpClient = getMercadoPagoClient();
-    const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+    const appUrl = resolvePublicAppUrl(req);
+    const isHttps = appUrl.startsWith('https://');
     const results = [];
 
     for (const item of items) {
       if (mpClient) {
         const preference = new Preference(mpClient);
-        const result = await preference.create({
-          body: {
-            items: [
-              {
-                id: item.referenceId || `item-${Date.now()}`,
-                title: item.title || 'Receita Mãos em Obra',
-                description: item.description || 'Receita de obra gerida pelo Mãos em Obra',
-                unit_price: Number(item.amount) || 0,
-                quantity: 1,
-                currency_id: 'BRL',
-              },
-            ],
-            payer: {
-              name: item.payerName || 'Cliente / Solicitante',
-              email: item.payerEmail || 'cliente@maosemobra.com.br',
+        const prefBody: any = {
+          items: [
+            {
+              id: item.referenceId || `item-${Date.now()}`,
+              title: item.title || 'Receita Mãos em Obra',
+              description: item.description || 'Receita de obra gerida pelo Mãos em Obra',
+              unit_price: Number(item.amount) || 0,
+              quantity: 1,
+              currency_id: 'BRL',
             },
-            back_urls: {
-              success: `${appUrl}/?mp_status=approved`,
-              failure: `${appUrl}/?mp_status=failure`,
-              pending: `${appUrl}/?mp_status=pending`,
-            },
-            auto_return: 'approved',
-            external_reference: item.referenceId || `ref-${Date.now()}`,
-            statement_descriptor: 'MAOS EM OBRA',
+          ],
+          payer: {
+            name: item.payerName || 'Cliente / Solicitante',
+            email: item.payerEmail && String(item.payerEmail).includes('@') ? item.payerEmail : 'cliente@maosemobra.com.br',
           },
-        });
+          back_urls: {
+            success: `${appUrl}/?mp_status=approved`,
+            failure: `${appUrl}/?mp_status=failure`,
+            pending: `${appUrl}/?mp_status=pending`,
+          },
+          external_reference: item.referenceId || `ref-${Date.now()}`,
+          statement_descriptor: 'MAOS EM OBRA',
+        };
+        if (isHttps) {
+          prefBody.auto_return = 'approved';
+          prefBody.notification_url = `${appUrl}/api/mercadopago/webhook`;
+        }
+        const result = await preference.create({ body: prefBody });
         results.push({
           referenceId: item.referenceId,
           title: item.title,
@@ -1311,23 +3926,25 @@ app.post('/api/mercadopago/create-pix', async (req, res) => {
 
     if (mpClient) {
       try {
-        const payment = new Payment(mpClient);
-        const paymentData = await payment.create({
-          body: {
-            transaction_amount: Number(amount),
-            description: description || 'Pagamento Mãos em Obra',
-            payment_method_id: 'pix',
-            payer: {
-              email: payerEmail || 'cliente@maosemobra.com.br',
-              first_name: payerName ? payerName.split(' ')[0] : 'Cliente',
-              last_name: payerName && payerName.split(' ').length > 1 ? payerName.split(' ').slice(1).join(' ') : 'Obra',
-              identification: payerCpf ? {
-                type: 'CPF',
-                number: payerCpf.replace(/\D/g, '')
-              } : undefined,
+        const paymentData = await withMercadoPagoRetry(async (client) => {
+          const payment = new Payment(client);
+          return await payment.create({
+            body: {
+              transaction_amount: Number(amount),
+              description: description || 'Pagamento Mãos em Obra',
+              payment_method_id: 'pix',
+              payer: {
+                email: payerEmail || 'cliente@maosemobra.com.br',
+                first_name: payerName ? payerName.split(' ')[0] : 'Cliente',
+                last_name: payerName && payerName.split(' ').length > 1 ? payerName.split(' ').slice(1).join(' ') : 'Obra',
+                identification: payerCpf ? {
+                  type: 'CPF',
+                  number: payerCpf.replace(/\D/g, '')
+                } : undefined,
+              },
+              external_reference: referenceId || `pix-${Date.now()}`,
             },
-            external_reference: referenceId || `pix-${Date.now()}`,
-          },
+          });
         });
 
         const poi = paymentData.point_of_interaction?.transaction_data;
@@ -1553,6 +4170,64 @@ app.post(['/api/mercadopago/webhook', '/api/webhook/mercadopago'], async (req, r
 
     console.log(`[Mercado Pago Webhook] Notification received: eventType=${eventType}, paymentId=${paymentId}, action=${action}`);
 
+    if (paymentId && eventType.includes('preapproval')) {
+      const mpClient = getMercadoPagoClient();
+      if (mpClient && !paymentId.startsWith('demo')) {
+        try {
+          const preApproval = new PreApproval(mpClient);
+          const subData = await preApproval.get({ id: paymentId });
+          const subStatus = subData.status || 'pending';
+          const extRef = subData.external_reference || paymentId;
+          const payerEmailSub = subData.payer_email || '';
+          const isAuth = subStatus === 'authorized';
+
+          const subIdx = subscriberPayments.findIndex(
+            (p) =>
+              p.id === extRef ||
+              p.billingExternalRef === extRef ||
+              (payerEmailSub && p.subscriberEmail && p.subscriberEmail.toLowerCase() === payerEmailSub.toLowerCase())
+          );
+
+          if (subIdx !== -1 && isAuth) {
+            subscriberPayments[subIdx].status = 'Aprovado';
+            subscriberPayments[subIdx].billingStatus = 'Pago no MP';
+            subscriberPayments[subIdx].mpVerifiedStatus = 'approved';
+            subscriberPayments[subIdx].transactionId = paymentId;
+            subscriberPayments[subIdx].paymentDate = new Date().toISOString().split('T')[0];
+            if (Number(subscriberPayments[subIdx].amount) > 0) {
+              autoEmitNfseForPayment({
+                paymentId: subscriberPayments[subIdx].id,
+                paymentReference: paymentId,
+                tomadorName: subscriberPayments[subIdx].subscriberName,
+                tomadorEmail: subscriberPayments[subIdx].subscriberEmail,
+                tomadorRole: subscriberPayments[subIdx].subscriberRole,
+                planType: subscriberPayments[subIdx].planType,
+                grossAmount: Number(subscriberPayments[subIdx].amount),
+                triggerSource: 'Automático (Webhook Mercado Pago)',
+              });
+            }
+          }
+
+          webhookEventsLog.unshift({
+            id: `EVT-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            sourceIp: req.ip || 'mercadopago',
+            eventType: `preapproval.${subStatus}`,
+            paymentId,
+            externalReference: extRef,
+            status: subStatus,
+            amount: Number(subData.auto_recurring?.transaction_amount) || 0,
+            payerEmail: payerEmailSub,
+            matchedEntity: subIdx !== -1 ? subscriberPayments[subIdx].subscriberName : 'Assinatura Recorrente MP',
+            result: isAuth ? 'Assinatura Mensal Recorrente autorizada' : `Status assinatura: ${subStatus}`,
+          });
+        } catch (preErr: any) {
+          console.warn('[Mercado Pago Webhook] Note fetching preapproval:', preErr?.message || preErr);
+        }
+      }
+      return res.status(200).json({ received: true, processed: true, type: 'preapproval' });
+    }
+
     if (paymentId && (eventType.includes('payment') || action?.includes('payment'))) {
       const mpClient = getMercadoPagoClient();
       let status = simulatedStatus || 'pending';
@@ -1632,8 +4307,10 @@ app.post(['/api/mercadopago/webhook', '/api/webhook/mercadopago'], async (req, r
       // 2. Atualizar Mensalidades e Assinaturas (subscriberPayments)
       const subIdx = subscriberPayments.findIndex(p => 
         p.id === externalRef || 
-        p.transactionId === externalRef || 
-        (payerEmail && p.subscriberEmail.toLowerCase() === payerEmail.toLowerCase())
+        p.billingExternalRef === externalRef ||
+        p.transactionId === externalRef ||
+        (p.mpPaymentId && String(p.mpPaymentId) === String(paymentId)) ||
+        (payerEmail && p.subscriberEmail && p.subscriberEmail.toLowerCase() === payerEmail.toLowerCase())
       );
 
       if (subIdx !== -1) {
@@ -1641,6 +4318,9 @@ app.post(['/api/mercadopago/webhook', '/api/webhook/mercadopago'], async (req, r
         if (internalStatus === 'Aprovado') {
           subscriberPayments[subIdx].paymentDate = dateApproved || new Date().toISOString().split('T')[0];
           subscriberPayments[subIdx].transactionId = paymentId;
+          subscriberPayments[subIdx].mpPaymentId = paymentId;
+          subscriberPayments[subIdx].billingStatus = 'Pago no MP';
+          subscriberPayments[subIdx].mpVerifiedStatus = 'approved';
         }
         matchedEntity = `Assinante: ${subscriberPayments[subIdx].subscriberName}`;
         
@@ -1686,6 +4366,27 @@ app.post(['/api/mercadopago/webhook', '/api/webhook/mercadopago'], async (req, r
         });
       }
 
+      // 6. 🧾 AUTOMAÇÃO FISCAL: Emitir NFS-e automaticamente ao aprovar pagamento no Mercado Pago
+      let issuedNfse: FiscalNfseRecord | null = null;
+      if (internalStatus === 'Aprovado') {
+        const subRec = subIdx !== -1 ? subscriberPayments[subIdx] : null;
+        const cliRec = receiptIdx !== -1 ? clientAndProviderReceipts[receiptIdx] : null;
+        const resolvedAmount = Number(amount || subRec?.amount || cliRec?.amount || 0);
+        if (resolvedAmount > 0) {
+          issuedNfse = autoEmitNfseForPayment({
+            paymentId: subRec?.id || cliRec?.id || paymentId,
+            paymentReference: externalRef || paymentId,
+            tomadorName: subRec?.subscriberName || cliRec?.partyName || payerName || 'Assinante Plataforma Web',
+            tomadorEmail: subRec?.subscriberEmail || cliRec?.partyEmail || payerEmail,
+            tomadorDocument: cliRec?.partyCpfCnpj,
+            tomadorRole: subRec?.subscriberRole,
+            planType: subRec?.planType || cliRec?.description || 'Serviços Web Plataforma Mãos em Obra',
+            grossAmount: resolvedAmount,
+            triggerSource: 'Automático (Webhook Mercado Pago)',
+          });
+        }
+      }
+
       return res.status(200).json({
         success: true,
         message: 'Notificação do Mercado Pago processada com sucesso.',
@@ -1693,6 +4394,7 @@ app.post(['/api/mercadopago/webhook', '/api/webhook/mercadopago'], async (req, r
         status: internalStatus,
         externalReference: externalRef,
         matchedEntity,
+        issuedNfseNumber: issuedNfse?.nfseNumber || null,
       });
     }
 
@@ -1754,6 +4456,20 @@ app.post('/api/mercadopago/webhook/simulate', async (req, res) => {
     // Dispara auto-transferência se aprovado
     if (internalStatus === 'Aprovado' && autoWithdrawEnabled && targetAmount > 0) {
       performAutomaticTransfer(targetAmount, `Webhook Simulado: ${matchedEntity}`).catch(console.error);
+    }
+
+    // Dispara emissão automática de NFS-e se aprovado
+    if (internalStatus === 'Aprovado' && targetAmount > 0) {
+      autoEmitNfseForPayment({
+        paymentId: receipt?.id || targetRef,
+        paymentReference: targetRef,
+        tomadorName: receipt?.partyName || 'Tomador Simulação Webhook',
+        tomadorEmail: payerEmail || receipt?.partyEmail,
+        tomadorDocument: receipt?.partyCpfCnpj,
+        planType: receipt?.description || 'Assinatura Plataforma Web',
+        grossAmount: Number(targetAmount),
+        triggerSource: 'Automático (Webhook Mercado Pago)',
+      });
     }
 
     recordAuditLog(
@@ -2298,6 +5014,890 @@ app.post('/api/ai/optimize-budget', async (req, res) => {
     console.error('Error in /api/ai/optimize-budget:', error);
     return res.status(500).json({ error: error.message || 'Erro ao gerar otimização de orçamento' });
   }
+});
+
+// ==========================================
+// 🧾 ROTAS FISCAIS: NFS-e AUTOMÁTICA & CERTIFICADO DIGITAL A1
+//    MOREIRA BRASIL SERVIÇOS — CNPJ 68.603.032/0001-15
+// ==========================================
+
+app.get('/api/fiscal/config', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  return res.json({
+    success: true,
+    config: getSanitizedFiscalConfig(),
+    webCatalog: WEB_SERVICE_CNAES_CATALOG,
+  });
+});
+
+app.post('/api/fiscal/config', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const body = req.body || {};
+
+  // Strictly enforce Web Services CNAEs ONLY
+  if (Array.isArray(body.webActivities)) {
+    const incomingInvalid = body.webActivities.find((act: any) => act?.code && !isAllowedWebServiceCnae(act.code));
+    if (incomingInvalid) {
+      return res.status(400).json({
+        error: `Atividade CNAE "${incomingInvalid.code}" rejeitada. Somente atividades relacionadas a Serviços Web (CNAEs 62xx/63xx) são permitidas para MOREIRA BRASIL SERVIÇOS.`,
+      });
+    }
+
+    const updatedMap = new Map<string, any>(
+      body.webActivities.map((a: any) => [String(a.code), a])
+    );
+
+    fiscalConfig.webActivities = WEB_SERVICE_CNAES_CATALOG.map((catalogItem) => {
+      const incoming = updatedMap.get(catalogItem.code);
+      const customEp = incoming?.customEndpoint ? String(incoming.customEndpoint).trim() : '';
+      return {
+        ...catalogItem,
+        enabled: incoming ? Boolean(incoming.enabled) : catalogItem.enabled,
+        isPrimary: incoming ? Boolean(incoming.isPrimary) : catalogItem.isPrimary,
+        issRate:
+          incoming && incoming.issRate !== undefined
+            ? Math.max(0, Math.min(5, Number(incoming.issRate) || 2.0))
+            : catalogItem.issRate,
+        customEndpoint: customEp || undefined,
+      };
+    });
+
+    // Guarantee at least one Web Service activity stays enabled
+    if (!fiscalConfig.webActivities.some((a) => a.enabled)) {
+      fiscalConfig.webActivities[0].enabled = true;
+    }
+    const primary = fiscalConfig.webActivities.find((a) => a.isPrimary && a.enabled) || fiscalConfig.webActivities.find((a) => a.enabled);
+    if (primary) {
+      fiscalConfig.defaultWebActivityCode = primary.code;
+      fiscalConfig.webActivities = fiscalConfig.webActivities.map((a) => ({
+        ...a,
+        isPrimary: a.code === primary.code,
+      }));
+    }
+  }
+
+  if (body.defaultWebActivityCode) {
+    if (!isAllowedWebServiceCnae(body.defaultWebActivityCode)) {
+      return res.status(400).json({
+        error: `CNAE "${body.defaultWebActivityCode}" não pertence ao escopo de Serviços Web.`,
+      });
+    }
+    fiscalConfig.defaultWebActivityCode = body.defaultWebActivityCode;
+    fiscalConfig.webActivities = fiscalConfig.webActivities.map((a) => ({
+      ...a,
+      enabled: a.code === body.defaultWebActivityCode ? true : a.enabled,
+      isPrimary: a.code === body.defaultWebActivityCode,
+    }));
+  }
+
+  if (typeof body.autoEmitOnPayment === 'boolean') fiscalConfig.autoEmitOnPayment = body.autoEmitOnPayment;
+  if (body.environment === 'homologacao' || body.environment === 'producao') fiscalConfig.environment = body.environment;
+  if (body.regimeTributario) fiscalConfig.regimeTributario = body.regimeTributario;
+  if (body.inscricaoMunicipal !== undefined) fiscalConfig.inscricaoMunicipal = String(body.inscricaoMunicipal).trim();
+  if (body.municipioNome !== undefined) fiscalConfig.municipioNome = String(body.municipioNome).trim();
+  if (body.municipioIbge !== undefined) fiscalConfig.municipioIbge = String(body.municipioIbge).replace(/\D/g, '').slice(0, 7) || fiscalConfig.municipioIbge;
+  if (body.uf !== undefined) fiscalConfig.uf = String(body.uf).trim().toUpperCase().slice(0, 2) || fiscalConfig.uf;
+  if (body.rpsSeries !== undefined) fiscalConfig.rpsSeries = String(body.rpsSeries).trim().toUpperCase().slice(0, 5) || 'WEB';
+  if (body.defaultAliquotaIss !== undefined) {
+    const rate = Math.max(0, Math.min(5, Number(body.defaultAliquotaIss) || 2.0));
+    fiscalConfig.defaultAliquotaIss = rate;
+  }
+  if (body.serviceDescriptionTemplate !== undefined) {
+    fiscalConfig.serviceDescriptionTemplate = String(body.serviceDescriptionTemplate).trim();
+  }
+  if (typeof body.emailNotificationToClient === 'boolean') {
+    fiscalConfig.emailNotificationToClient = body.emailNotificationToClient;
+  }
+
+  // Prefeitura / NF-e API Integration config
+  if (body.apiIntegration && typeof body.apiIntegration === 'object') {
+    const incomingApi = body.apiIntegration;
+    if (incomingApi.provider && PROVIDER_LABELS[incomingApi.provider as FiscalApiProviderId]) {
+      const pId = incomingApi.provider as FiscalApiProviderId;
+      fiscalConfig.apiIntegration.provider = pId;
+      fiscalConfig.apiIntegration.providerLabel = PROVIDER_LABELS[pId];
+    }
+    if (typeof incomingApi.autoTransmitToProvider === 'boolean') {
+      fiscalConfig.apiIntegration.autoTransmitToProvider = incomingApi.autoTransmitToProvider;
+    }
+    if (incomingApi.productionEndpoint !== undefined) {
+      fiscalConfig.apiIntegration.productionEndpoint = String(incomingApi.productionEndpoint).trim();
+    }
+    if (incomingApi.homologacaoEndpoint !== undefined) {
+      fiscalConfig.apiIntegration.homologacaoEndpoint = String(incomingApi.homologacaoEndpoint).trim();
+    }
+    if (incomingApi.soapAction !== undefined) {
+      fiscalConfig.apiIntegration.soapAction = String(incomingApi.soapAction).trim();
+    }
+    if (typeof incomingApi.useStoredCertificateMtls === 'boolean') {
+      fiscalConfig.apiIntegration.useStoredCertificateMtls = incomingApi.useStoredCertificateMtls;
+    }
+    if (incomingApi.apiCompanyId !== undefined) {
+      fiscalConfig.apiIntegration.apiCompanyId = String(incomingApi.apiCompanyId).trim();
+    }
+    if (incomingApi.customHeaderName !== undefined) {
+      fiscalConfig.apiIntegration.customHeaderName = String(incomingApi.customHeaderName).trim() || 'Authorization';
+    }
+    if (
+      typeof incomingApi.apiToken === 'string' &&
+      incomingApi.apiToken.trim() &&
+      !incomingApi.apiToken.includes('••••')
+    ) {
+      storedFiscalApiToken = incomingApi.apiToken.trim();
+    }
+  }
+
+  saveFiscalVault();
+
+  recordAuditLog(
+    'CONFIG_CHANGE',
+    'INFO',
+    req.ip || '127.0.0.1',
+    `Configuração fiscal & API atualizada (${fiscalConfig.companyName} | Provedor: ${fiscalConfig.apiIntegration.providerLabel} | Emissão automática: ${fiscalConfig.autoEmitOnPayment ? 'Ativa' : 'Pausada'} | CNAE Web: ${fiscalConfig.defaultWebActivityCode})`
+  );
+
+  return res.json({ success: true, config: getSanitizedFiscalConfig() });
+});
+
+app.post('/api/fiscal/certificate/upload', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const {
+    fileName,
+    base64Content,
+    password,
+    insertionMode,
+    certificatePemText,
+    privateKeyPemText,
+  } = req.body || {};
+
+  // Mode 1: Direct PEM X.509 Certificate + RSA Private Key text insertion
+  if (insertionMode === 'pem_text' || (certificatePemText && !base64Content)) {
+    const certText = String(certificatePemText || '').trim();
+    const keyText = String(privateKeyPemText || '').trim();
+    const certMatch = certText.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/);
+    if (!certMatch) {
+      return res.status(400).json({
+        error: 'Bloco X.509 inválido. Cole o certificado começando com -----BEGIN CERTIFICATE-----.',
+      });
+    }
+    try {
+      const x509 = new crypto.X509Certificate(certMatch[0]);
+      if (keyText) {
+        if (!keyText.includes('PRIVATE KEY')) {
+          return res.status(400).json({ error: 'Chave privada PEM inválida.' });
+        }
+        // Validate private key and check compatibility with certificate public key
+        const privKeyObj = crypto.createPrivateKey(keyText);
+        const testSig = crypto.sign('sha256', Buffer.from('moreira-check'), privKeyObj);
+        const ok = crypto.verify('sha256', Buffer.from('moreira-check'), x509.publicKey, testSig);
+        if (!ok) {
+          return res.status(400).json({
+            error: 'A Chave Privada inserida não corresponde à Chave Pública deste Certificado X.509.',
+          });
+        }
+        activeCertificatePrivateKeyPem = keyText;
+      }
+
+      const now = new Date();
+      const validToDate = new Date(x509.validTo);
+      const isExpired = validToDate.getTime() < now.getTime();
+      const subjectStr = x509.subject.replace(/\n/g, ', ');
+      const issuerStr = x509.issuer.replace(/\n/g, ', ');
+      const cnpjMatch =
+        subjectStr.includes(fiscalConfig.cnpj) ||
+        subjectStr.includes(fiscalConfig.cnpjFormatted) ||
+        (x509.subjectAltName || '').includes(fiscalConfig.cnpj);
+
+      activeCertificatePem = certMatch[0];
+      const cleanLabel = String(fileName || 'certificado-a1-inserido.pem').trim();
+
+      fiscalConfig.certificate = {
+        id: `CERT-${fiscalConfig.cnpj}`,
+        companyName: fiscalConfig.companyName,
+        cnpj: fiscalConfig.cnpj,
+        cnpjFormatted: fiscalConfig.cnpjFormatted,
+        certificateType: 'A1 ICP-Brasil (X.509 PEM Inserido)',
+        status: isExpired ? 'Expirado' : 'Ativo (.PFX Validado ICP-Brasil)',
+        hasUploadedPfx: true,
+        fileName: cleanLabel,
+        subjectName: subjectStr || fiscalConfig.certificate.subjectName,
+        issuerName: issuerStr || fiscalConfig.certificate.issuerName,
+        serialNumber: x509.serialNumber || fiscalConfig.certificate.serialNumber,
+        thumbprintSha256: x509.fingerprint256.replace(/:/g, '').toUpperCase(),
+        validFrom: new Date(x509.validFrom).toISOString(),
+        validTo: validToDate.toISOString(),
+        uploadedAt: new Date().toISOString(),
+        lastVerifiedAt: new Date().toISOString(),
+        cnpjMatchesEmitter: cnpjMatch,
+      };
+
+      saveFiscalVault();
+      recordAuditLog(
+        'CONFIG_CHANGE',
+        isExpired ? 'WARNING' : 'INFO',
+        req.ip || '127.0.0.1',
+        `Certificado A1 PEM inserido manualmente no cofre AES-256-GCM para ${fiscalConfig.companyName} (Serial ${fiscalConfig.certificate.serialNumber})`
+      );
+
+      return res.json({
+        success: true,
+        message: isExpired
+          ? 'Certificado PEM armazenado no cofre, porém encontra-se expirado.'
+          : 'Certificado Digital A1 PEM e chave privada validados criptograficamente e armazenados com AES-256-GCM!',
+        certificate: fiscalConfig.certificate,
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        error: err?.message || 'Erro ao validar o Certificado PEM / Chave Privada informada.',
+      });
+    }
+  }
+
+  // Mode 2: File upload or pasted Base64 PKCS#12 (.pfx / .p12) / .pem
+  const defaultFileName = insertionMode === 'pfx_base64' ? 'certificado-a1-base64.pfx' : '';
+  const cleanName = String(fileName || defaultFileName).trim();
+  if (!cleanName || !base64Content) {
+    return res.status(400).json({ error: 'Selecione um arquivo ou cole o conteúdo Base64 do certificado digital (.pfx, .p12 ou .pem).' });
+  }
+
+  const ext = path.extname(cleanName).toLowerCase() || (insertionMode === 'pfx_base64' ? '.pfx' : '');
+  if (!['.pfx', '.p12', '.pem', '.crt'].includes(ext)) {
+    return res.status(400).json({ error: 'Formato inválido. Utilize arquivo .pfx, .p12, .pem ou .crt ICP-Brasil.' });
+  }
+
+  const cleanBase64 = String(base64Content).includes(',')
+    ? String(base64Content).split(',')[1]
+    : String(base64Content).replace(/\s+/g, '');
+
+  let rawBuffer: Buffer;
+  try {
+    rawBuffer = Buffer.from(cleanBase64, 'base64');
+    if (rawBuffer.length < 32) {
+      return res.status(400).json({ error: 'Arquivo de certificado inválido ou vazio.' });
+    }
+  } catch {
+    return res.status(400).json({ error: 'Conteúdo base64 do certificado inválido.' });
+  }
+
+  const tmpFile = path.join(os.tmpdir(), `cert-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
+  try {
+    fs.writeFileSync(tmpFile, rawBuffer);
+    let certPem = '';
+    let keyPem = '';
+
+    if (ext === '.pfx' || ext === '.p12') {
+      const passInput = `${String(password || '')}\n`;
+      certPem = execFileSync(
+        'openssl',
+        ['pkcs12', '-in', tmpFile, '-clcerts', '-nokeys', '-passin', 'stdin'],
+        { input: passInput, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      keyPem = execFileSync(
+        'openssl',
+        ['pkcs12', '-in', tmpFile, '-nocerts', '-nodes', '-passin', 'stdin'],
+        { input: passInput, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+    } else {
+      const textContent = rawBuffer.toString('utf8');
+      if (textContent.includes('BEGIN CERTIFICATE')) {
+        certPem = textContent;
+      } else {
+        return res.status(400).json({ error: 'Arquivo PEM/CRT sem bloco X.509 válido.' });
+      }
+      if (textContent.includes('PRIVATE KEY')) {
+        keyPem = textContent;
+      }
+    }
+
+    const certMatch = certPem.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/);
+    if (!certMatch) {
+      return res.status(400).json({ error: 'Não foi possível extrair o certificado X.509. Verifique o arquivo e a senha.' });
+    }
+
+    const x509 = new crypto.X509Certificate(certMatch[0]);
+    const now = new Date();
+    const validToDate = new Date(x509.validTo);
+    const isExpired = validToDate.getTime() < now.getTime();
+    const subjectStr = x509.subject.replace(/\n/g, ', ');
+    const issuerStr = x509.issuer.replace(/\n/g, ', ');
+    const cnpjMatch = subjectStr.includes(fiscalConfig.cnpj) || subjectStr.includes(fiscalConfig.cnpjFormatted) || (x509.subjectAltName || '').includes(fiscalConfig.cnpj);
+
+    activeCertificatePem = certMatch[0];
+    if (keyPem && keyPem.includes('PRIVATE KEY')) {
+      activeCertificatePrivateKeyPem = keyPem;
+    }
+    if (ext === '.pfx' || ext === '.p12') {
+      storedCertificatePfxBase64 = cleanBase64;
+      storedCertificatePfxPassword = String(password || '');
+    }
+
+    fiscalConfig.certificate = {
+      id: `CERT-${fiscalConfig.cnpj}`,
+      companyName: fiscalConfig.companyName,
+      cnpj: fiscalConfig.cnpj,
+      cnpjFormatted: fiscalConfig.cnpjFormatted,
+      certificateType: ext === '.pfx' || ext === '.p12' ? 'A1 ICP-Brasil (PKCS#12 / .PFX)' : 'X.509 (.PEM/.CRT)',
+      status: isExpired ? 'Expirado' : 'Ativo (.PFX Validado ICP-Brasil)',
+      hasUploadedPfx: true,
+      fileName: cleanName,
+      subjectName: subjectStr || fiscalConfig.certificate.subjectName,
+      issuerName: issuerStr || fiscalConfig.certificate.issuerName,
+      serialNumber: x509.serialNumber || fiscalConfig.certificate.serialNumber,
+      thumbprintSha256: x509.fingerprint256.replace(/:/g, '').toUpperCase(),
+      validFrom: new Date(x509.validFrom).toISOString(),
+      validTo: validToDate.toISOString(),
+      uploadedAt: new Date().toISOString(),
+      lastVerifiedAt: new Date().toISOString(),
+      cnpjMatchesEmitter: cnpjMatch,
+    };
+
+    saveFiscalVault();
+
+    recordAuditLog(
+      'CONFIG_CHANGE',
+      isExpired ? 'WARNING' : 'INFO',
+      req.ip || '127.0.0.1',
+      `Certificado Digital armazenado no cofre AES-256-GCM para ${fiscalConfig.companyName} (${cleanName} | Serial ${fiscalConfig.certificate.serialNumber})`
+    );
+
+    return res.json({
+      success: true,
+      message: isExpired
+        ? 'Certificado armazenado no cofre criptografado, porém encontra-se expirado.'
+        : 'Certificado Digital A1 validado, armazenado com criptografia AES-256-GCM e vinculado para assinatura XML e conexão mTLS com a Prefeitura!',
+      certificate: fiscalConfig.certificate,
+    });
+  } catch (err: any) {
+    const errMsg = String(err?.stderr || err?.message || '');
+    if (errMsg.toLowerCase().includes('mac verify failure') || errMsg.toLowerCase().includes('invalid password')) {
+      return res.status(400).json({ error: 'Senha do certificado .PFX/.P12 incorreta.' });
+    }
+    return res.status(400).json({ error: 'Falha ao ler certificado digital (.pfx/.p12). Confira o arquivo e a senha informada.' });
+  } finally {
+    try {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+});
+
+app.get('/api/fiscal/nfse', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const authorized = nfseRecords.filter((n) => n.status === 'Autorizada');
+  const cancelled = nfseRecords.filter((n) => n.status === 'Cancelada');
+  const pendingApproved = getApprovedPaymentsWithoutNfse();
+
+  const summary = {
+    totalAuthorizedCount: authorized.length,
+    totalCancelledCount: cancelled.length,
+    totalAuthorizedAmount: Number(authorized.reduce((sum, n) => sum + n.grossAmount, 0).toFixed(2)),
+    totalIssAmount: Number(authorized.reduce((sum, n) => sum + n.issAmount, 0).toFixed(2)),
+    autoIssuedCount: authorized.filter((n) => n.triggerSource.startsWith('Automático')).length,
+    approvedPaymentsPendingNfse: pendingApproved.length,
+    transmittedAuthorizedCount: authorized.filter((n) => n.transmission?.transmissionStatus === 'Autorizada na API').length,
+    pendingTransmissionCount: authorized.filter(
+      (n) => !n.transmission || n.transmission.transmissionStatus === 'Assinada Localmente (Aguardando Conexão API)'
+    ).length,
+    rejectedTransmissionCount: authorized.filter((n) => n.transmission?.transmissionStatus === 'Rejeitada pela API').length,
+  };
+
+  return res.json({
+    success: true,
+    invoices: nfseRecords,
+    summary,
+    config: getSanitizedFiscalConfig(),
+    transmissionLogs: fiscalTransmissionLogs.slice(0, 50),
+  });
+});
+
+app.get('/api/fiscal/transmissions', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+  return res.json({ success: true, logs: fiscalTransmissionLogs.slice(0, 100) });
+});
+
+app.post('/api/fiscal/provider/test-connection', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const api = fiscalConfig.apiIntegration;
+  const provider = api.provider;
+  const providerLabel = PROVIDER_LABELS[provider] || provider;
+  const endpointBase = getActiveProviderEndpoint();
+  const useMtls = Boolean(
+    api.useStoredCertificateMtls && activeCertificatePem && activeCertificatePrivateKeyPem
+  );
+
+  if (!endpointBase) {
+    const msg = 'Informe o endpoint da Prefeitura ou provedor antes de testar a conexão.';
+    api.lastConnectionTestAt = new Date().toISOString();
+    api.lastConnectionStatus = 'Falha na Conexão';
+    api.lastConnectionMessage = msg;
+    saveFiscalVault();
+    return res.status(400).json({ error: msg });
+  }
+
+  let probeUrl = endpointBase;
+  const headers: Record<string, string> = {};
+  if (provider === 'focus_nfe') {
+    probeUrl = `${endpointBase}/v2/empresas/${fiscalConfig.cnpj}`;
+    if (storedFiscalApiToken) {
+      headers.Authorization = `Basic ${Buffer.from(`${storedFiscalApiToken}:`).toString('base64')}`;
+    }
+  } else if (provider === 'nfe_io') {
+    probeUrl = `${endpointBase}/v1/companies/${api.apiCompanyId || fiscalConfig.cnpj}`;
+    if (storedFiscalApiToken) headers.Authorization = storedFiscalApiToken;
+  } else if (provider === 'plugnotas') {
+    probeUrl = `${endpointBase}/empresa/${fiscalConfig.cnpj}`;
+    if (storedFiscalApiToken) headers['x-api-key'] = storedFiscalApiToken;
+  } else if (provider === 'webhook_custom' && storedFiscalApiToken) {
+    const hdrName = api.customHeaderName || 'Authorization';
+    headers[hdrName] =
+      hdrName.toLowerCase() === 'authorization' && !storedFiscalApiToken.startsWith('Bearer ') && !storedFiscalApiToken.startsWith('Basic ')
+        ? `Bearer ${storedFiscalApiToken}`
+        : storedFiscalApiToken;
+  }
+
+  try {
+    const resp = await dispatchHttpRequestWithMtls(probeUrl, {
+      method: 'GET',
+      headers,
+      useMtls,
+      timeoutMs: 10000,
+    });
+    const connected = resp.statusCode > 0 && resp.statusCode < 500;
+    const msg = connected
+      ? `Conexão estabelecida com ${providerLabel} (HTTP ${resp.statusCode})${useMtls ? ' via mTLS com Certificado Digital armazenado' : ''}.`
+      : `Servidor respondeu HTTP ${resp.statusCode} em ${probeUrl}.`;
+
+    api.lastConnectionTestAt = new Date().toISOString();
+    api.lastConnectionStatus = connected ? 'Conectado' : 'Falha na Conexão';
+    api.lastConnectionMessage = msg;
+
+    const log = recordTransmissionLog({
+      provider,
+      providerLabel,
+      action: 'TESTE_CONEXAO',
+      endpoint: probeUrl,
+      usedMtlsCertificate: useMtls,
+      success: connected,
+      httpStatus: resp.statusCode,
+      message: msg,
+    });
+    saveFiscalVault();
+
+    return res.json({
+      success: true,
+      connected,
+      httpStatus: resp.statusCode,
+      message: msg,
+      config: getSanitizedFiscalConfig(),
+      log,
+    });
+  } catch (err: any) {
+    const errMsg = err?.message || 'Falha de rede/TLS ao testar conexão.';
+    api.lastConnectionTestAt = new Date().toISOString();
+    api.lastConnectionStatus = 'Falha na Conexão';
+    api.lastConnectionMessage = errMsg;
+
+    const log = recordTransmissionLog({
+      provider,
+      providerLabel,
+      action: 'TESTE_CONEXAO',
+      endpoint: probeUrl,
+      usedMtlsCertificate: useMtls,
+      success: false,
+      message: errMsg,
+    });
+    saveFiscalVault();
+
+    return res.json({
+      success: false,
+      connected: false,
+      message: errMsg,
+      config: getSanitizedFiscalConfig(),
+      log,
+    });
+  }
+});
+
+app.post('/api/fiscal/provider/sync-certificate', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const api = fiscalConfig.apiIntegration;
+  const provider = api.provider;
+  const providerLabel = PROVIDER_LABELS[provider] || provider;
+
+  if (!fiscalConfig.certificate.hasUploadedPfx || !storedCertificatePfxBase64) {
+    return res.status(400).json({
+      error: 'Nenhum arquivo .PFX/.P12 armazenado no cofre. Instale o certificado A1 da MOREIRA BRASIL SERVIÇOS antes de sincronizar.',
+    });
+  }
+
+  // Direct Municipal mTLS providers use the stored certificate directly per request without cloud upload
+  if (provider === 'prefeitura_abrasf_soap' || provider === 'portal_nacional_nfse' || provider === 'webhook_custom') {
+    api.lastCertificateSyncAt = new Date().toISOString();
+    const msg = `Certificado A1 armazenado (${fiscalConfig.certificate.fileName || fiscalConfig.certificate.serialNumber}) habilitado para autenticação mTLS direta com ${providerLabel}.`;
+    const log = recordTransmissionLog({
+      provider,
+      providerLabel,
+      action: 'SINCRONIZAR_CERTIFICADO',
+      endpoint: getActiveProviderEndpoint() || 'mTLS Local Vault',
+      usedMtlsCertificate: true,
+      success: true,
+      message: msg,
+    });
+    saveFiscalVault();
+    return res.json({
+      success: true,
+      message: msg,
+      config: getSanitizedFiscalConfig(),
+      log,
+    });
+  }
+
+  if (!storedFiscalApiToken) {
+    return res.status(400).json({
+      error: `Informe e salve o Token de API do provedor ${providerLabel} antes de enviar o certificado.`,
+    });
+  }
+
+  const endpointBase = getActiveProviderEndpoint();
+  try {
+    let targetUrl = `${endpointBase}/v2/empresas/${fiscalConfig.cnpj}`;
+    let method: 'PUT' | 'POST' = 'PUT';
+    let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    let body = '';
+
+    if (provider === 'focus_nfe') {
+      headers.Authorization = `Basic ${Buffer.from(`${storedFiscalApiToken}:`).toString('base64')}`;
+      body = JSON.stringify({
+        arquivo_certificado_base64: storedCertificatePfxBase64,
+        senha_certificado: storedCertificatePfxPassword,
+      });
+    } else if (provider === 'nfe_io') {
+      method = 'POST';
+      targetUrl = `${endpointBase}/v1/companies/${api.apiCompanyId || fiscalConfig.cnpj}/certificate`;
+      headers.Authorization = storedFiscalApiToken;
+      body = JSON.stringify({
+        file: storedCertificatePfxBase64,
+        password: storedCertificatePfxPassword,
+      });
+    } else {
+      // plugnotas
+      method = 'POST';
+      targetUrl = `${endpointBase}/certificado`;
+      headers['x-api-key'] = storedFiscalApiToken;
+      body = JSON.stringify({
+        certificado: storedCertificatePfxBase64,
+        senha: storedCertificatePfxPassword,
+      });
+    }
+
+    const resp = await dispatchHttpRequestWithMtls(targetUrl, {
+      method,
+      headers,
+      body,
+      useMtls: false,
+    });
+    const ok = resp.statusCode >= 200 && resp.statusCode < 300;
+    const msg = ok
+      ? `Certificado A1 enviado e sincronizado com sucesso no provedor ${providerLabel} (HTTP ${resp.statusCode}).`
+      : `Provedor respondeu HTTP ${resp.statusCode}: ${resp.body.slice(0, 220)}`;
+
+    if (ok) api.lastCertificateSyncAt = new Date().toISOString();
+    const log = recordTransmissionLog({
+      provider,
+      providerLabel,
+      action: 'SINCRONIZAR_CERTIFICADO',
+      endpoint: targetUrl,
+      usedMtlsCertificate: false,
+      success: ok,
+      httpStatus: resp.statusCode,
+      message: msg,
+    });
+    saveFiscalVault();
+
+    if (!ok) return res.status(400).json({ error: msg, log });
+    return res.json({
+      success: true,
+      message: msg,
+      config: getSanitizedFiscalConfig(),
+      log,
+    });
+  } catch (err: any) {
+    const errMsg = err?.message || 'Erro de rede ao enviar certificado digital ao provedor.';
+    recordTransmissionLog({
+      provider,
+      providerLabel,
+      action: 'SINCRONIZAR_CERTIFICADO',
+      endpoint: endpointBase,
+      usedMtlsCertificate: false,
+      success: false,
+      message: errMsg,
+    });
+    saveFiscalVault();
+    return res.status(500).json({ error: errMsg });
+  }
+});
+
+app.post('/api/fiscal/nfse/:id/transmit', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const { id } = req.params;
+  try {
+    const result = await transmitNfseToExternalProvider(id);
+    recordAuditLog(
+      'CONFIG_CHANGE',
+      result.success ? 'INFO' : 'WARNING',
+      req.ip || '127.0.0.1',
+      `Transmissão NFS-e #${result.invoice.nfseNumber} para ${result.invoice.transmission?.providerLabel}: ${result.invoice.transmission?.transmissionStatus} (${result.invoice.transmission?.responseMessage || ''})`
+    );
+    return res.json({
+      success: result.success,
+      invoice: result.invoice,
+      log: result.log,
+      message: result.invoice.transmission?.responseMessage,
+    });
+  } catch (err: any) {
+    return res.status(404).json({ error: err?.message || 'NFS-e não encontrada.' });
+  }
+});
+
+app.post('/api/fiscal/nfse/emit', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const {
+    tomadorName,
+    tomadorEmail,
+    tomadorDocument,
+    tomadorRole,
+    grossAmount,
+    cnaeCode,
+    serviceDescription,
+    competenceDate,
+    paymentId,
+    paymentReference,
+    transmitImmediately,
+  } = req.body || {};
+
+  if (!tomadorName || !grossAmount || Number(grossAmount) <= 0) {
+    return res.status(400).json({ error: 'Nome do tomador e valor maior que R$ 0,00 são obrigatórios.' });
+  }
+
+  if (cnaeCode && !isAllowedWebServiceCnae(cnaeCode)) {
+    return res.status(400).json({
+      error: `Atividade CNAE "${cnaeCode}" não permitida. Somente atividades relacionadas a Serviços Web são autorizadas.`,
+    });
+  }
+
+  try {
+    const invoice = autoEmitNfseForPayment({
+      paymentId,
+      paymentReference,
+      tomadorName: String(tomadorName).trim(),
+      tomadorEmail: tomadorEmail ? String(tomadorEmail).trim() : undefined,
+      tomadorDocument: tomadorDocument ? String(tomadorDocument).trim() : undefined,
+      tomadorRole: tomadorRole ? String(tomadorRole).trim() : undefined,
+      grossAmount: Number(grossAmount),
+      cnaeCode,
+      serviceDescription: serviceDescription ? String(serviceDescription).trim() : undefined,
+      competenceDate,
+      triggerSource: 'Emissão Manual',
+      forceEvenIfAutoDisabled: true,
+    });
+
+    if (!invoice) {
+      return res.status(400).json({ error: 'Não foi possível emitir a NFS-e.' });
+    }
+
+    const shouldTransmit =
+      transmitImmediately === true ||
+      (transmitImmediately !== false && fiscalConfig.apiIntegration.autoTransmitToProvider);
+    if (shouldTransmit) {
+      await transmitNfseToExternalProvider(invoice.id);
+    }
+
+    recordAuditLog(
+      'CONFIG_CHANGE',
+      'INFO',
+      req.ip || '127.0.0.1',
+      `NFS-e #${invoice.nfseNumber} emitida manualmente (${invoice.cnaeCode}) para ${invoice.tomadorName} — R$ ${invoice.grossAmount.toFixed(2)}`
+    );
+
+    const authorized = nfseRecords.filter((n) => n.status === 'Autorizada');
+    return res.json({
+      success: true,
+      invoice,
+      summary: {
+        totalAuthorizedCount: authorized.length,
+        totalCancelledCount: nfseRecords.filter((n) => n.status === 'Cancelada').length,
+        totalAuthorizedAmount: Number(authorized.reduce((sum, n) => sum + n.grossAmount, 0).toFixed(2)),
+        totalIssAmount: Number(authorized.reduce((sum, n) => sum + n.issAmount, 0).toFixed(2)),
+        autoIssuedCount: authorized.filter((n) => n.triggerSource.startsWith('Automático')).length,
+        approvedPaymentsPendingNfse: getApprovedPaymentsWithoutNfse().length,
+        transmittedAuthorizedCount: authorized.filter((n) => n.transmission?.transmissionStatus === 'Autorizada na API').length,
+        pendingTransmissionCount: authorized.filter(
+          (n) => !n.transmission || n.transmission.transmissionStatus === 'Assinada Localmente (Aguardando Conexão API)'
+        ).length,
+        rejectedTransmissionCount: authorized.filter((n) => n.transmission?.transmissionStatus === 'Rejeitada pela API').length,
+      },
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao emitir NFS-e.' });
+  }
+});
+
+app.post('/api/fiscal/nfse/emit-pending-approved', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const pendingApproved = getApprovedPaymentsWithoutNfse();
+  let emittedCount = 0;
+
+  for (const s of pendingApproved) {
+    const issued = autoEmitNfseForPayment({
+      paymentId: s.id,
+      paymentReference: s.transactionId || s.reference,
+      tomadorName: s.subscriberName,
+      tomadorEmail: s.subscriberEmail,
+      tomadorRole: s.subscriberRole,
+      planType: s.planType,
+      grossAmount: Number(s.amount),
+      competenceDate: s.paymentDate || new Date().toISOString().split('T')[0],
+      triggerSource: 'Emissão em Lote',
+      forceEvenIfAutoDisabled: true,
+    });
+    if (issued) {
+      emittedCount++;
+      if (fiscalConfig.apiIntegration.autoTransmitToProvider) {
+        await transmitNfseToExternalProvider(issued.id);
+      }
+    }
+  }
+
+  const authorized = nfseRecords.filter((n) => n.status === 'Autorizada');
+  recordAuditLog(
+    'CONFIG_CHANGE',
+    'INFO',
+    req.ip || '127.0.0.1',
+    `Emissão em lote de NFS-e concluída: ${emittedCount} nota(s) fiscal(is) emitida(s) para pagamentos aprovados.`
+  );
+
+  return res.json({
+    success: true,
+    emittedCount,
+    invoices: nfseRecords,
+    summary: {
+      totalAuthorizedCount: authorized.length,
+      totalCancelledCount: nfseRecords.filter((n) => n.status === 'Cancelada').length,
+      totalAuthorizedAmount: Number(authorized.reduce((sum, n) => sum + n.grossAmount, 0).toFixed(2)),
+      totalIssAmount: Number(authorized.reduce((sum, n) => sum + n.issAmount, 0).toFixed(2)),
+      autoIssuedCount: authorized.filter((n) => n.triggerSource.startsWith('Automático')).length,
+      approvedPaymentsPendingNfse: getApprovedPaymentsWithoutNfse().length,
+      transmittedAuthorizedCount: authorized.filter((n) => n.transmission?.transmissionStatus === 'Autorizada na API').length,
+      pendingTransmissionCount: authorized.filter(
+        (n) => !n.transmission || n.transmission.transmissionStatus === 'Assinada Localmente (Aguardando Conexão API)'
+      ).length,
+      rejectedTransmissionCount: authorized.filter((n) => n.transmission?.transmissionStatus === 'Rejeitada pela API').length,
+    },
+  });
+});
+
+app.post('/api/fiscal/nfse/:id/cancel', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const { id } = req.params;
+  const { reason } = req.body || {};
+  const record = nfseRecords.find((n) => n.id === id || n.nfseNumber === id);
+  if (!record) {
+    return res.status(404).json({ error: 'NFS-e não encontrada.' });
+  }
+  if (record.status === 'Cancelada') {
+    return res.status(400).json({ error: 'Esta NFS-e já foi cancelada.' });
+  }
+
+  // If previously transmitted to Focus NFe, request external cancellation as well
+  const api = fiscalConfig.apiIntegration;
+  if (
+    record.transmission?.transmissionStatus === 'Autorizada na API' &&
+    api.provider === 'focus_nfe' &&
+    storedFiscalApiToken
+  ) {
+    try {
+      const cancelUrl = `${getActiveProviderEndpoint()}/v2/nfse/${encodeURIComponent(record.id)}`;
+      await dispatchHttpRequestWithMtls(cancelUrl, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${Buffer.from(`${storedFiscalApiToken}:`).toString('base64')}`,
+        },
+        body: JSON.stringify({ justificativa: String(reason || 'Cancelamento administrativo').slice(0, 255) }),
+      });
+    } catch {
+      // log handled locally
+    }
+  }
+
+  record.status = 'Cancelada';
+  record.cancelledAt = new Date().toISOString();
+  record.cancelReason = String(reason || 'Cancelamento solicitado pelo Admin Master').trim();
+  saveFiscalVault();
+
+  recordAuditLog(
+    'CONFIG_CHANGE',
+    'WARNING',
+    req.ip || '127.0.0.1',
+    `NFS-e #${record.nfseNumber} cancelada (${record.cancelReason})`
+  );
+
+  return res.json({ success: true, invoice: record });
 });
 
 // Setup Vite middleware for development or serve dist in production

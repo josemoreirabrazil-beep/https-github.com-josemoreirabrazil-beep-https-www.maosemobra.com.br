@@ -1,0 +1,1291 @@
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import {
+  Send,
+  CreditCard,
+  QrCode,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Copy,
+  Check,
+  ExternalLink,
+  Mail,
+  MessageCircle,
+  Users,
+  PlusCircle,
+  Sparkles,
+  FileSpreadsheet,
+  X,
+  Clock,
+  ShieldCheck,
+  Zap,
+  UserPlus,
+  BadgeDollarSign
+} from 'lucide-react';
+import type {
+  Project,
+  TeamMember,
+  ServiceRequest,
+  SubscriberPayment,
+  SubscriptionPlanPricing,
+  SubscriberPlan,
+  SubscriberRole,
+  LiveMercadoPagoPayment
+} from '../types';
+import {
+  emitSubscribersBillingBatch,
+  fetchLiveMercadoPagoPayments,
+  markSubscribersBillingSent,
+  adjustPendingSubscribersBilling,
+  getReducedPlanPrice,
+  INITIAL_PLANS
+} from '../services/subscriberBilling';
+import { loadServiceProviders } from '../services/storage';
+import { generateQrCodeDataUrl } from '../utils/pix';
+import confetti from 'canvas-confetti';
+
+interface SubscriberBillingDispatcherProps {
+  adminToken?: string;
+  subscriberPayments: SubscriberPayment[];
+  subscriptionPlans: SubscriptionPlanPricing[];
+  projects: Project[];
+  team: TeamMember[];
+  serviceRequests: ServiceRequest[];
+  onBillingUpdated: () => Promise<void> | void;
+}
+
+interface BillableCandidate {
+  id: string;
+  source: 'Assinante' | 'Cliente Obra' | 'Solicitante' | 'Equipe/Fornecedor' | 'Prestador';
+  subscriberName: string;
+  subscriberEmail: string;
+  subscriberPhone: string;
+  subscriberRole: SubscriberRole;
+  planType: SubscriberPlan;
+  amount: number;
+  status: string;
+  dueDate: string;
+  billingStatus?: SubscriberPayment['billingStatus'];
+  billingLink?: string;
+  pixTicketUrl?: string;
+  pixCopyPaste?: string;
+  mpPaymentId?: string | number;
+  mpPreferenceId?: string;
+  billingExternalRef?: string;
+  billingEmittedAt?: string;
+  billingSentAt?: string;
+  billingChannel?: string;
+  billingMessage?: string;
+  mpVerifiedStatus?: string;
+}
+
+function formatBrWhatsappUrl(phone: string, message: string): string | null {
+  const digits = (phone || '').replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  const fullNumber = digits.startsWith('55') ? digits : `55${digits}`;
+  return `https://wa.me/${fullNumber}?text=${encodeURIComponent(message)}`;
+}
+
+function buildMailtoUrl(email: string, name: string, plan: string, amount: number, message: string): string | null {
+  if (!email || !email.includes('@')) return null;
+  const subject = `Cobrança Mãos em Obra — ${plan} (R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+  const body = message.replace(/\*/g, '');
+  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherProps> = ({
+  adminToken,
+  subscriberPayments,
+  subscriptionPlans,
+  projects,
+  team,
+  serviceRequests,
+  onBillingUpdated,
+}) => {
+  const availablePlans = useMemo(
+    () => (subscriptionPlans.length > 0 ? subscriptionPlans : INITIAL_PLANS).filter(p => Number(p.price) > 0),
+    [subscriptionPlans]
+  );
+
+  const [candidates, setCandidates] = useState<BillableCandidate[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [includePlatformUsers, setIncludePlatformUsers] = useState<boolean>(false);
+
+  const [isEmitting, setIsEmitting] = useState(false);
+  const [isAdjustingPending, setIsAdjustingPending] = useState(false);
+  const [isSyncingMp, setIsSyncingMp] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const prevServerSnapshotRef = useRef<Map<string, { amount: number; planType: string; billingExternalRef?: string; billingLink?: string }>>(new Map());
+
+  // Live Mercado Pago account audit state
+  const [liveMpPayments, setLiveMpPayments] = useState<LiveMercadoPagoPayment[]>([]);
+  const [liveMpMeta, setLiveMpMeta] = useState<{
+    totalInMercadoPago: number;
+    approvedCount: number;
+    pendingCount: number;
+    subscriberMatchedApprovedCount: number;
+    syncedAt?: string;
+  } | null>(null);
+  const [showLiveMpList, setShowLiveMpList] = useState(false);
+
+  // Add real subscriber inline modal/drawer
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newRole, setNewRole] = useState<SubscriberRole>('Prestador de Serviço');
+  const [newPlan, setNewPlan] = useState<SubscriberPlan>('Mensal Pro');
+  const [newAmount, setNewAmount] = useState('29.90');
+
+  // QR preview modal state
+  const [qrPreviewCandidate, setQrPreviewCandidate] = useState<BillableCandidate | null>(null);
+  const [qrPreviewDataUrl, setQrPreviewDataUrl] = useState<string>('');
+
+  // Build unified candidates list preserving unsaved local overrides unless server data updated
+  useEffect(() => {
+    const defaultDue = new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0];
+
+    setCandidates((prev) => {
+      const prevMap = new Map<string, BillableCandidate>(prev.map((c) => [c.id, c]));
+      const nextList: BillableCandidate[] = [];
+      const seenEmails = new Set<string>();
+      const seenNames = new Set<string>();
+
+      // 1. Registered subscribers from subscriberPayments (primary source)
+      for (const sub of subscriberPayments) {
+        if (Number(sub.amount) <= 0 && sub.planType === 'Gratuito Lançamento') continue;
+        const existing = prevMap.get(sub.id);
+        const prevSnap = prevServerSnapshotRef.current.get(sub.id);
+        const serverChanged =
+          !prevSnap ||
+          Math.abs(prevSnap.amount - (Number(sub.amount) || 0)) > 0.009 ||
+          prevSnap.planType !== sub.planType ||
+          prevSnap.billingExternalRef !== sub.billingExternalRef ||
+          prevSnap.billingLink !== sub.billingLink;
+
+        const emailKey = (sub.subscriberEmail || '').trim().toLowerCase();
+        const nameKey = (sub.subscriberName || '').trim().toLowerCase();
+        if (emailKey) seenEmails.add(emailKey);
+        if (nameKey) seenNames.add(nameKey);
+
+        nextList.push({
+          id: sub.id,
+          source: 'Assinante',
+          subscriberName: sub.subscriberName,
+          subscriberEmail: sub.subscriberEmail || '',
+          subscriberPhone: sub.subscriberPhone || '',
+          subscriberRole: sub.subscriberRole,
+          planType: serverChanged ? sub.planType : (existing?.planType || sub.planType),
+          amount: serverChanged
+            ? (Number(sub.amount) || getReducedPlanPrice(sub.planType, 29.90))
+            : (existing?.amount !== undefined ? existing.amount : Number(sub.amount) || 29.90),
+          status: sub.status,
+          dueDate: sub.dueDate || defaultDue,
+          billingStatus: sub.billingStatus || (sub.mpVerifiedStatus === 'approved' ? 'Pago no MP' : 'Não Emitida'),
+          billingLink: sub.billingLink ?? (serverChanged ? undefined : existing?.billingLink),
+          pixTicketUrl: sub.pixTicketUrl ?? (serverChanged ? undefined : existing?.pixTicketUrl),
+          pixCopyPaste: sub.pixCopyPaste ?? (serverChanged ? undefined : existing?.pixCopyPaste),
+          mpPaymentId: sub.mpPaymentId ?? (serverChanged ? undefined : existing?.mpPaymentId),
+          mpPreferenceId: sub.mpPreferenceId ?? (serverChanged ? undefined : existing?.mpPreferenceId),
+          billingExternalRef: sub.billingExternalRef ?? (serverChanged ? undefined : existing?.billingExternalRef),
+          billingEmittedAt: sub.billingEmittedAt ?? (serverChanged ? undefined : existing?.billingEmittedAt),
+          billingSentAt: sub.billingSentAt ?? (serverChanged ? undefined : existing?.billingSentAt),
+          billingChannel: sub.billingChannel ?? (serverChanged ? undefined : existing?.billingChannel),
+          billingMessage: sub.billingMessage ?? (serverChanged ? undefined : existing?.billingMessage),
+          mpVerifiedStatus: sub.mpVerifiedStatus,
+        });
+      }
+
+      // 2. Optional: Import real platform users (Projects clients, Service Requests, Team, Service Providers)
+      if (includePlatformUsers) {
+        const pushExternal = (raw: Omit<BillableCandidate, 'status' | 'dueDate'>) => {
+          const emailKey = raw.subscriberEmail.trim().toLowerCase();
+          const nameKey = raw.subscriberName.trim().toLowerCase();
+          if (!nameKey) return;
+          if (emailKey && seenEmails.has(emailKey)) return;
+          if (seenNames.has(nameKey)) return;
+          if (emailKey) seenEmails.add(emailKey);
+          seenNames.add(nameKey);
+
+          const existing = prevMap.get(raw.id);
+          nextList.push({
+            ...raw,
+            planType: existing?.planType || raw.planType,
+            amount: existing?.amount !== undefined ? existing.amount : raw.amount,
+            status: 'Pendente',
+            dueDate: defaultDue,
+            billingStatus: existing?.billingStatus || 'Não Emitida',
+            billingLink: existing?.billingLink,
+            pixTicketUrl: existing?.pixTicketUrl,
+            pixCopyPaste: existing?.pixCopyPaste,
+            billingMessage: existing?.billingMessage,
+            billingEmittedAt: existing?.billingEmittedAt,
+            billingSentAt: existing?.billingSentAt,
+            billingChannel: existing?.billingChannel,
+          });
+        };
+
+        projects.forEach((p) => {
+          pushExternal({
+            id: `cli-proj-${p.id}`,
+            source: 'Cliente Obra',
+            subscriberName: p.clientName,
+            subscriberEmail: p.clientEmail || '',
+            subscriberPhone: '',
+            subscriberRole: 'Solicitante / Cliente',
+            planType: 'Mensal Pro',
+            amount: 29.90,
+          });
+        });
+
+        serviceRequests.forEach((sr) => {
+          pushExternal({
+            id: `cli-req-${sr.id}`,
+            source: 'Solicitante',
+            subscriberName: sr.clientName,
+            subscriberEmail: sr.clientEmail || '',
+            subscriberPhone: sr.clientPhone || '',
+            subscriberRole: 'Solicitante / Cliente',
+            planType: 'Mensal Básico',
+            amount: 25.00,
+          });
+        });
+
+        team.forEach((tm) => {
+          pushExternal({
+            id: `team-${tm.id}`,
+            source: 'Equipe/Fornecedor',
+            subscriberName: tm.name,
+            subscriberEmail: tm.email || '',
+            subscriberPhone: tm.phone || '',
+            subscriberRole: tm.category === 'supplier' || tm.category === 'Fornecedor' ? 'Loja / Fornecedor' : 'Prestador de Serviço',
+            planType: 'Mensal Pro',
+            amount: 29.90,
+          });
+        });
+
+        const providers = loadServiceProviders();
+        providers.forEach((prov) => {
+          pushExternal({
+            id: `prov-real-${prov.id}`,
+            source: 'Prestador',
+            subscriberName: prov.name,
+            subscriberEmail: prov.email || '',
+            subscriberPhone: prov.whatsapp || prov.phone || '',
+            subscriberRole: 'Prestador de Serviço',
+            planType: 'Mensal Pro',
+            amount: 29.90,
+          });
+        });
+      }
+
+      // Preserve manually added custom rows not yet saved
+      for (const old of prev) {
+        if (old.id.startsWith('custom-') && !nextList.some((n) => n.id === old.id)) {
+          nextList.unshift(old);
+        }
+      }
+
+      return nextList;
+    });
+
+    const nextSnap = new Map<string, { amount: number; planType: string; billingExternalRef?: string; billingLink?: string }>();
+    for (const sub of subscriberPayments) {
+      nextSnap.set(sub.id, {
+        amount: Number(sub.amount) || 0,
+        planType: sub.planType,
+        billingExternalRef: sub.billingExternalRef,
+        billingLink: sub.billingLink,
+      });
+    }
+    prevServerSnapshotRef.current = nextSnap;
+  }, [subscriberPayments, includePlatformUsers, projects, serviceRequests, team]);
+
+  // Pre-select all unpaid / unverified-in-MP candidates on first load
+  useEffect(() => {
+    if (candidates.length > 0 && selectedIds.size === 0) {
+      const unpaid = candidates.filter((c) => c.mpVerifiedStatus !== 'approved').map((c) => c.id);
+      if (unpaid.length > 0) {
+        setSelectedIds(new Set(unpaid));
+      }
+    }
+  }, [candidates.length]);
+
+  // Sync live payments from Mercado Pago API on mount
+  const handleSyncLiveMercadoPago = async (silent = false) => {
+    setIsSyncingMp(true);
+    if (!silent) setStatusNotice(null);
+    try {
+      const res = await fetchLiveMercadoPagoPayments(adminToken);
+      setLiveMpPayments(res.payments || []);
+      setLiveMpMeta({
+        totalInMercadoPago: res.totalInMercadoPago,
+        approvedCount: res.approvedCount,
+        pendingCount: res.pendingCount,
+        subscriberMatchedApprovedCount: res.subscriberMatchedApprovedCount,
+        syncedAt: new Date().toLocaleTimeString('pt-BR'),
+      });
+      if (res.reconciledCount > 0) {
+        await onBillingUpdated();
+        setStatusNotice({
+          type: 'success',
+          text: `Sincronizado com Mercado Pago: ${res.reconciledCount} pagamento(s) de assinante(s) confirmado(s) e atualizado(s) automaticamente!`,
+        });
+      } else if (!silent) {
+        setStatusNotice({
+          type: res.subscriberMatchedApprovedCount > 0 ? 'success' : 'warning',
+          text:
+            res.subscriberMatchedApprovedCount > 0
+              ? `${res.subscriberMatchedApprovedCount} assinatura(s) confirmadas na API do Mercado Pago.`
+              : `Consulta ao vivo no Mercado Pago concluída (${res.totalInMercadoPago} transações na conta, ${res.approvedCount} aprovadas no geral, 0 pagamentos de planos de assinantes confirmados até o momento). Emita e envie as cobranças abaixo.`,
+        });
+      }
+    } catch (err: any) {
+      if (!silent) {
+        setStatusNotice({
+          type: 'error',
+          text: err.message || 'Não foi possível consultar o histórico ao vivo do Mercado Pago.',
+        });
+      }
+    } finally {
+      setIsSyncingMp(false);
+    }
+  };
+
+  useEffect(() => {
+    handleSyncLiveMercadoPago(true);
+  }, []);
+
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === candidates.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(candidates.map((c) => c.id)));
+    }
+  };
+
+  const handlePlanChangeForCandidate = (id: string, planCode: SubscriberPlan) => {
+    const matchedPlan = availablePlans.find((p) => p.code === planCode || p.name === planCode);
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              planType: planCode,
+              amount: matchedPlan ? Number(matchedPlan.price) : c.amount,
+            }
+          : c
+      )
+    );
+  };
+
+  const handleAmountChangeForCandidate = (id: string, value: string) => {
+    const parsed = parseFloat(value);
+    setCandidates((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, amount: Number.isNaN(parsed) ? 0 : parsed } : c))
+    );
+  };
+
+  const handleAddCustomSubscriber = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    const id = `custom-${Date.now()}`;
+    const amt = Number(newAmount) || 29.90;
+    const due = new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0];
+
+    const newItem: BillableCandidate = {
+      id,
+      source: 'Assinante',
+      subscriberName: newName.trim(),
+      subscriberEmail: newEmail.trim(),
+      subscriberPhone: newPhone.trim(),
+      subscriberRole: newRole,
+      planType: newPlan,
+      amount: amt,
+      status: 'Pendente',
+      dueDate: due,
+      billingStatus: 'Não Emitida',
+    };
+
+    setCandidates((prev) => [newItem, ...prev]);
+    setSelectedIds((prev) => new Set(prev).add(id));
+    setNewName('');
+    setNewEmail('');
+    setNewPhone('');
+    setShowAddForm(false);
+  };
+
+  const handleEmitSelectedCharges = async () => {
+    const targets = candidates.filter((c) => selectedIds.has(c.id) && Number(c.amount) > 0);
+    if (targets.length === 0) {
+      setStatusNotice({
+        type: 'warning',
+        text: 'Selecione pelo menos 1 assinante com valor maior que R$ 0,00 para emitir cobrança no Mercado Pago.',
+      });
+      return;
+    }
+
+    setIsEmitting(true);
+    setStatusNotice(null);
+    try {
+      const payload = targets.map((t) => ({
+        id: t.id,
+        subscriberName: t.subscriberName,
+        subscriberEmail: t.subscriberEmail,
+        subscriberPhone: t.subscriberPhone,
+        subscriberRole: t.subscriberRole,
+        planType: t.planType,
+        amount: Number(t.amount),
+        dueDate: t.dueDate,
+        reference: `Assinatura ${t.planType} - Mãos em Obra`,
+      }));
+
+      const res = await emitSubscribersBillingBatch(payload, adminToken);
+
+      // Update local candidates immediately with returned charges
+      const chargeMap = new Map(res.emittedCharges.map((ch) => [ch.id, ch]));
+      setCandidates((prev) =>
+        prev.map((c) => {
+          const ch = chargeMap.get(c.id);
+          if (!ch) return c;
+          return {
+            ...c,
+            status: c.mpVerifiedStatus === 'approved' ? 'Aprovado' : 'Pendente',
+            billingStatus: c.mpVerifiedStatus === 'approved' ? 'Pago no MP' : 'Cobrança Emitida',
+            billingLink: ch.billingLink,
+            pixTicketUrl: ch.pixTicketUrl,
+            pixCopyPaste: ch.pixCopyPaste,
+            mpPreferenceId: ch.mpPreferenceId,
+            mpPaymentId: ch.mpPaymentId,
+            billingExternalRef: ch.billingExternalRef,
+            billingEmittedAt: ch.billingEmittedAt,
+            billingMessage: ch.billingMessage,
+          };
+        })
+      );
+
+      confetti({ particleCount: 90, spread: 75, origin: { y: 0.6 } });
+      setStatusNotice({
+        type: 'success',
+        text: `${res.totalEmitted} cobrança(s) reais emitidas no Mercado Pago (${res.livePreferencesCount} links Checkout Pro + ${res.livePixCount} PIX gerados ao vivo). Agora clique nos botões "WhatsApp" ou "E-mail" de cada assinante para enviar!`,
+      });
+
+      await onBillingUpdated();
+    } catch (err: any) {
+      setStatusNotice({
+        type: 'error',
+        text: err.message || 'Erro ao emitir cobranças no Mercado Pago.',
+      });
+    } finally {
+      setIsEmitting(false);
+    }
+  };
+
+  const handleAdjustPendingCharges = async () => {
+    const pendingRows = candidates.filter(
+      (c) =>
+        (c.status === 'Pendente' || c.status === 'Atrasado') &&
+        c.mpVerifiedStatus !== 'approved' &&
+        c.billingStatus !== 'Pago no MP'
+    );
+
+    if (pendingRows.length === 0) {
+      setStatusNotice({
+        type: 'warning',
+        text: 'Nenhuma cobrança pendente ou em atraso encontrada para ajuste no momento.',
+      });
+      return;
+    }
+
+    setIsAdjustingPending(true);
+    setStatusNotice(null);
+
+    try {
+      const updates = pendingRows.map((c) => ({
+        id: c.id,
+        planType: c.planType,
+        amount:
+          c.planType === 'Personalizado'
+            ? Number(c.amount) || 0
+            : getReducedPlanPrice(c.planType, c.amount),
+      }));
+
+      const res = await adjustPendingSubscribersBilling(
+        { reemitMercadoPago: true, updates },
+        adminToken
+      );
+
+      // Update local candidates immediately (including any unsaved platform/custom pending rows)
+      const serverMap = new Map(
+        (res.subscriberPayments || []).map((s) => [s.id, s])
+      );
+      setCandidates((prev) =>
+        prev.map((c) => {
+          const updatedSub = serverMap.get(c.id);
+          if (updatedSub) {
+            return {
+              ...c,
+              planType: updatedSub.planType,
+              amount: Number(updatedSub.amount) || 0,
+              status: updatedSub.status,
+              billingStatus: updatedSub.billingStatus || 'Não Emitida',
+              billingLink: updatedSub.billingLink,
+              pixTicketUrl: updatedSub.pixTicketUrl,
+              pixCopyPaste: updatedSub.pixCopyPaste,
+              mpPreferenceId: updatedSub.mpPreferenceId,
+              mpPaymentId: updatedSub.mpPaymentId,
+              billingExternalRef: updatedSub.billingExternalRef,
+              billingEmittedAt: updatedSub.billingEmittedAt,
+              billingMessage: updatedSub.billingMessage,
+            };
+          }
+          const isPending =
+            (c.status === 'Pendente' || c.status === 'Atrasado') &&
+            c.mpVerifiedStatus !== 'approved' &&
+            c.billingStatus !== 'Pago no MP';
+          if (isPending && c.planType !== 'Personalizado') {
+            const reduced = getReducedPlanPrice(c.planType, c.amount);
+            if (Math.abs(c.amount - reduced) > 0.009) {
+              return {
+                ...c,
+                amount: reduced,
+                billingStatus: 'Não Emitida',
+                billingLink: undefined,
+                pixTicketUrl: undefined,
+                pixCopyPaste: undefined,
+                billingMessage: undefined,
+              };
+            }
+          }
+          return c;
+        })
+      );
+
+      confetti({ particleCount: 70, spread: 65, origin: { y: 0.6 } });
+      setStatusNotice({
+        type: 'success',
+        text:
+          res.adjustedCount > 0 || res.reemittedCount > 0
+            ? `Cobranças pendentes ajustadas aos planos reduzidos (Básico R$ 25,00 • Pro R$ 29,90 • Construtor R$ 49,90 • Anual R$ 499,00): ${res.adjustedCount} valor(es) corrigido(s) e ${res.reemittedCount} cobrança(s) atualizada(s) no Mercado Pago.`
+            : `Todas as ${pendingRows.length} cobrança(s) pendente(s) já estão alinhadas com os novos valores reduzidos dos planos.`,
+      });
+
+      await onBillingUpdated();
+    } catch (err: any) {
+      setStatusNotice({
+        type: 'error',
+        text: err.message || 'Erro ao ajustar cobranças pendentes para os valores reduzidos.',
+      });
+    } finally {
+      setIsAdjustingPending(false);
+    }
+  };
+
+  const handleMarkDispatched = async (id: string, channel: 'WhatsApp' | 'Email' | 'Link Copiado') => {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              billingStatus: c.billingStatus === 'Pago no MP' ? 'Pago no MP' : 'Enviada',
+              billingSentAt: new Date().toISOString(),
+              billingChannel: channel,
+            }
+          : c
+      )
+    );
+    await markSubscribersBillingSent([id], channel, adminToken);
+    await onBillingUpdated();
+  };
+
+  const handleCopyBillingText = async (candidate: BillableCandidate) => {
+    const text =
+      candidate.billingMessage ||
+      `Cobrança Mãos em Obra — ${candidate.subscriberName} (${candidate.planType}): R$ ${candidate.amount.toFixed(2)}\nLink Mercado Pago: ${candidate.billingLink || ''}\nPIX Copia e Cola: ${candidate.pixCopyPaste || ''}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(candidate.id);
+      setTimeout(() => setCopiedId(null), 2200);
+      await handleMarkDispatched(candidate.id, 'Link Copiado');
+    } catch {
+      // Fallback ignored
+    }
+  };
+
+  const handleOpenQrPreview = async (candidate: BillableCandidate) => {
+    setQrPreviewCandidate(candidate);
+    if (candidate.pixCopyPaste) {
+      const url = await generateQrCodeDataUrl(candidate.pixCopyPaste);
+      setQrPreviewDataUrl(url);
+    } else {
+      setQrPreviewDataUrl('');
+    }
+  };
+
+  const handleExportBillingCsv = () => {
+    const headers = ['Assinante', 'Origem', 'Email', 'WhatsApp', 'Plano', 'Valor (R$)', 'Status Cobrança', 'Link Checkout Pro MP', 'Link Fatura PIX', 'PIX Copia e Cola', 'Referência'];
+    const rows = candidates.map((c) => [
+      `"${c.subscriberName.replace(/"/g, '""')}"`,
+      c.source,
+      c.subscriberEmail,
+      c.subscriberPhone,
+      c.planType,
+      c.amount.toFixed(2),
+      c.billingStatus || 'Não Emitida',
+      c.billingLink || '',
+      c.pixTicketUrl || '',
+      c.pixCopyPaste || '',
+      c.billingExternalRef || '',
+    ]);
+    const csv = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    const a = document.createElement('a');
+    a.href = encodeURI(csv);
+    a.download = `cobrancas-assinantes-mercadopago-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const emittedCount = candidates.filter((c) => Boolean(c.billingLink || c.pixCopyPaste)).length;
+  const sentCount = candidates.filter((c) => c.billingStatus === 'Enviada' || c.billingStatus === 'Pago no MP').length;
+  const pendingCandidates = candidates.filter(
+    (c) =>
+      (c.status === 'Pendente' || c.status === 'Atrasado') &&
+      c.mpVerifiedStatus !== 'approved' &&
+      c.billingStatus !== 'Pago no MP'
+  );
+  const mismatchedPendingCount = pendingCandidates.filter(
+    (c) =>
+      c.planType !== 'Personalizado' &&
+      Math.abs((Number(c.amount) || 0) - getReducedPlanPrice(c.planType, c.amount)) > 0.009
+  ).length;
+  const selectedTotalAmount = candidates
+    .filter((c) => selectedIds.has(c.id))
+    .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+
+  return (
+    <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border-2 border-[#009ee3]/40 shadow-md space-y-5">
+      {/* Header */}
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="p-2 rounded-xl bg-[#009ee3]/15 text-[#009ee3]">
+              <CreditCard className="w-5 h-5" />
+            </div>
+            <h3 className="text-base font-black text-slate-900 dark:text-white">
+              Central de Emissão &amp; Envio de Cobranças Reais (Mercado Pago)
+            </h3>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+              API Produção Ativa
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Gere links oficiais de pagamento (Checkout Pro + PIX QR Code ao vivo) para cada assinante real e envie por WhatsApp ou E-mail com baixa automática via Webhook.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleSyncLiveMercadoPago(false)}
+            disabled={isSyncingMp}
+            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-[#009ee3] ${isSyncingMp ? 'animate-spin' : ''}`} />
+            <span>{isSyncingMp ? 'Consultando MP...' : 'Sincronizar Pagamentos MP'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIncludePlatformUsers((v) => !v)}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0 ${
+              includePlatformUsers
+                ? 'bg-amber-500 text-slate-950 border-amber-500'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
+            }`}
+            title="Incluir também Clientes de Obras, Solicitantes, Equipe e Prestadores cadastrados na plataforma"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>{includePlatformUsers ? 'Usuários da Plataforma Incluídos' : 'Incluir Clientes & Equipe'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowAddForm((v) => !v)}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <UserPlus className="w-3.5 h-3.5 text-amber-400" />
+            <span>Adicionar Assinante</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportBillingCsv}
+            className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Exportar Links</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Live Mercado Pago Audit Strip */}
+      {liveMpMeta && (
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-4 text-xs">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className={`w-4 h-4 ${liveMpMeta.subscriberMatchedApprovedCount > 0 ? 'text-emerald-500' : 'text-amber-500'}`} />
+              <span className="font-bold text-slate-700 dark:text-slate-200">
+                Auditoria Real Mercado Pago:
+              </span>
+              <span className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+                liveMpMeta.subscriberMatchedApprovedCount > 0
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+              }`}>
+                {liveMpMeta.subscriberMatchedApprovedCount} assinatura(s) liquidadas no MP
+              </span>
+            </div>
+
+            <span className="text-slate-500 dark:text-slate-400">
+              Transações totais na conta MP: <strong className="text-slate-800 dark:text-slate-200">{liveMpMeta.totalInMercadoPago}</strong> ({liveMpMeta.approvedCount} aprovadas no extrato recente)
+            </span>
+
+            {liveMpMeta.syncedAt && (
+              <span className="text-[11px] text-slate-400">
+                Atualizado às {liveMpMeta.syncedAt}
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowLiveMpList((v) => !v)}
+            className="text-xs font-bold text-[#009ee3] hover:underline flex items-center gap-1 cursor-pointer self-start lg:self-auto"
+          >
+            <span>{showLiveMpList ? 'Ocultar Extrato Mercado Pago' : 'Ver Extrato Real do Mercado Pago'}</span>
+            <ExternalLink className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Optional Expandable Live Mercado Pago Transactions Table */}
+      {showLiveMpList && (
+        <div className="p-4 rounded-2xl bg-slate-900 text-slate-200 border border-slate-800 space-y-2">
+          <div className="text-xs font-black uppercase tracking-wider text-[#009ee3]">
+            Últimas Transações Reais na Conta Mercado Pago
+          </div>
+          {liveMpPayments.length === 0 ? (
+            <p className="text-xs text-slate-400">Nenhuma transação retornada pela API.</p>
+          ) : (
+            <div className="overflow-x-auto max-h-56 overflow-y-auto">
+              <table className="w-full text-left text-[11px]">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px]">
+                    <th className="py-2 px-2">ID Pagamento MP</th>
+                    <th className="py-2 px-2">Valor</th>
+                    <th className="py-2 px-2">Status MP</th>
+                    <th className="py-2 px-2">Descrição / Ref</th>
+                    <th className="py-2 px-2">Data</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {liveMpPayments.slice(0, 12).map((lp) => (
+                    <tr key={String(lp.id)}>
+                      <td className="py-1.5 px-2 font-mono">{lp.id}</td>
+                      <td className="py-1.5 px-2 font-bold">R$ {lp.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                      <td className="py-1.5 px-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          lp.status === 'approved'
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : lp.status === 'pending'
+                            ? 'bg-amber-500/20 text-amber-300'
+                            : 'bg-slate-700 text-slate-300'
+                        }`}>
+                          {lp.status}
+                        </span>
+                      </td>
+                      <td className="py-1.5 px-2 truncate max-w-xs">{lp.description || lp.externalReference || 'Pagamento direto'}</td>
+                      <td className="py-1.5 px-2 text-slate-400">{lp.dateCreated ? new Date(lp.dateCreated).toLocaleDateString('pt-BR') : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add Subscriber Inline Form */}
+      {showAddForm && (
+        <form
+          onSubmit={handleAddCustomSubscriber}
+          className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/30 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end text-xs"
+        >
+          <div className="lg:col-span-2">
+            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Nome / Empresa *</label>
+            <input
+              type="text"
+              required
+              placeholder="Nome completo do assinante"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">E-mail</label>
+            <input
+              type="email"
+              placeholder="email@dominio.com"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">WhatsApp</label>
+            <input
+              type="text"
+              placeholder="(73) 99999-9999"
+              value={newPhone}
+              onChange={(e) => setNewPhone(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Plano &amp; Valor</label>
+            <select
+              value={newPlan}
+              onChange={(e) => {
+                const code = e.target.value as SubscriberPlan;
+                setNewPlan(code);
+                const p = availablePlans.find((item) => item.code === code || item.name === code);
+                if (p) setNewAmount(String(p.price));
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold"
+            >
+              {availablePlans.map((p) => (
+                <option key={p.id} value={p.code}>
+                  {p.name} (R$ {p.price.toFixed(2)})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="0.01"
+              min="1"
+              value={newAmount}
+              onChange={(e) => setNewAmount(e.target.value)}
+              className="w-24 px-2.5 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-black"
+            />
+            <button
+              type="submit"
+              className="flex-1 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black cursor-pointer whitespace-nowrap"
+            >
+              Incluir
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Status Notice */}
+      {statusNotice && (
+        <div
+          className={`p-3.5 rounded-2xl text-xs font-bold flex items-start gap-2.5 border ${
+            statusNotice.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+              : statusNotice.type === 'warning'
+              ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+              : 'bg-rose-50 dark:bg-rose-950/50 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+          }`}
+        >
+          {statusNotice.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          )}
+          <span>{statusNotice.text}</span>
+        </div>
+      )}
+
+      {/* Batch Action Bar */}
+      <div className="p-4 rounded-2xl bg-slate-900 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <button
+            type="button"
+            onClick={handleSelectAll}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold border border-slate-700 cursor-pointer"
+          >
+            {selectedIds.size === candidates.length && candidates.length > 0 ? 'Desmarcar Todos' : `Selecionar Todos (${candidates.length})`}
+          </button>
+
+          <div>
+            <span className="text-slate-400">Selecionados:</span>{' '}
+            <strong className="text-amber-400">{selectedIds.size} assinante(s)</strong>
+          </div>
+          <div>
+            <span className="text-slate-400">Total do Lote:</span>{' '}
+            <strong className="text-emerald-400">
+              R$ {selectedTotalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </strong>
+          </div>
+          <div>
+            <span className="text-slate-400">Emitidos:</span>{' '}
+            <strong className="text-white">{emittedCount}</strong>
+            <span className="text-slate-500 mx-1">•</span>
+            <span className="text-slate-400">Enviados:</span>{' '}
+            <strong className="text-[#009ee3]">{sentCount}</strong>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleAdjustPendingCharges}
+            disabled={isAdjustingPending || pendingCandidates.length === 0}
+            className={`px-4 py-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0 border ${
+              mismatchedPendingCount > 0
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400 shadow-lg'
+                : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
+            }`}
+            title="Alinha automaticamente todas as cobranças pendentes aos valores reduzidos (R$ 25,00 / R$ 29,90 / R$ 49,90 / R$ 499,00) e atualiza os links do Mercado Pago"
+          >
+            {isAdjustingPending ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Ajustando Pendentes...</span>
+              </>
+            ) : (
+              <>
+                <BadgeDollarSign className="w-4 h-4" />
+                <span>
+                  Ajustar Pendentes p/ Planos Reduzidos ({pendingCandidates.length})
+                  {mismatchedPendingCount > 0 ? ` • ${mismatchedPendingCount} p/ corrigir` : ''}
+                </span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleEmitSelectedCharges}
+            disabled={isEmitting || selectedIds.size === 0}
+            className="px-5 py-3 rounded-xl bg-gradient-to-r from-[#009ee3] to-emerald-500 hover:from-[#0082ba] hover:to-emerald-400 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+          >
+            {isEmitting ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Emitindo Links &amp; PIX no Mercado Pago...</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-4 h-4" />
+                <span>Emitir Cobranças Reais no Mercado Pago ({selectedIds.size})</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Subscribers Billing Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+              <th className="py-3 px-2 w-8">
+                <input
+                  type="checkbox"
+                  checked={candidates.length > 0 && selectedIds.size === candidates.length}
+                  onChange={handleSelectAll}
+                  className="rounded cursor-pointer"
+                />
+              </th>
+              <th className="py-3 px-3">Assinante Real</th>
+              <th className="py-3 px-3">Plano &amp; Valor Cobrado</th>
+              <th className="py-3 px-3">Status Mercado Pago / Envio</th>
+              <th className="py-3 px-3 text-right">Links &amp; Envio Direto</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {candidates.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="py-10 text-center text-slate-400">
+                  Nenhum assinante com plano pago encontrado. Clique em &quot;Incluir Clientes &amp; Equipe&quot; ou &quot;Adicionar Assinante&quot;.
+                </td>
+              </tr>
+            ) : (
+              candidates.map((c) => {
+                const isSelected = selectedIds.has(c.id);
+                const hasCharge = Boolean(c.billingLink || c.pixCopyPaste);
+                const msg =
+                  c.billingMessage ||
+                  `Olá ${c.subscriberName}, segue sua cobrança Mãos em Obra (${c.planType} - R$ ${c.amount.toFixed(2)}): ${c.billingLink || ''}`;
+                const waHref = hasCharge ? formatBrWhatsappUrl(c.subscriberPhone, msg) : null;
+                const mailHref = hasCharge ? buildMailtoUrl(c.subscriberEmail, c.subscriberName, c.planType, c.amount, msg) : null;
+
+                return (
+                  <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                    <td className="py-3.5 px-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelect(c.id)}
+                        className="rounded cursor-pointer"
+                      />
+                    </td>
+
+                    <td className="py-3.5 px-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-slate-900 dark:text-white">{c.subscriberName}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[9px] font-bold text-slate-500">
+                          {c.source}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {c.subscriberPhone || 'Sem WhatsApp'} {c.subscriberEmail ? `• ${c.subscriberEmail}` : ''}
+                      </div>
+                      {c.billingExternalRef && (
+                        <div className="text-[10px] font-mono text-[#009ee3] mt-0.5">
+                          Ref MP: {c.billingExternalRef}
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="py-3.5 px-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={c.planType}
+                          onChange={(e) => handlePlanChangeForCandidate(c.id, e.target.value as SubscriberPlan)}
+                          className="px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                        >
+                          {availablePlans.map((p) => (
+                            <option key={p.id} value={p.code}>
+                              {p.name}
+                            </option>
+                          ))}
+                          <option value="Personalizado">Personalizado</option>
+                        </select>
+
+                        <div className="flex items-center gap-1">
+                          <span className="text-[11px] font-bold text-slate-400">R$</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="1"
+                            value={c.amount}
+                            onChange={(e) => handleAmountChangeForCandidate(c.id, e.target.value)}
+                            className="w-20 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-emerald-600 dark:text-emerald-400"
+                          />
+                        </div>
+                      </div>
+                      {(c.status === 'Pendente' || c.status === 'Atrasado') &&
+                        c.mpVerifiedStatus !== 'approved' &&
+                        c.planType !== 'Personalizado' &&
+                        Math.abs((Number(c.amount) || 0) - getReducedPlanPrice(c.planType, c.amount)) > 0.009 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleAmountChangeForCandidate(
+                                c.id,
+                                String(getReducedPlanPrice(c.planType, c.amount).toFixed(2))
+                              )
+                            }
+                            className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold cursor-pointer transition"
+                            title="Aplicar novo valor reduzido do plano"
+                          >
+                            <span>
+                              Ajustar p/ R${' '}
+                              {getReducedPlanPrice(c.planType, c.amount).toLocaleString('pt-BR', {
+                                minimumFractionDigits: 2,
+                              })}
+                            </span>
+                          </button>
+                        )}
+                    </td>
+
+                    <td className="py-3.5 px-3">
+                      {c.mpVerifiedStatus === 'approved' || c.billingStatus === 'Pago no MP' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Pago no Mercado Pago</span>
+                        </span>
+                      ) : c.billingStatus === 'Enviada' ? (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30">
+                            <Send className="w-3 h-3" />
+                            <span>Enviada ({c.billingChannel || 'WhatsApp'})</span>
+                          </span>
+                          <div className="text-[10px] text-slate-400">Aguardando liquidação MP</div>
+                        </div>
+                      ) : hasCharge ? (
+                        <div className="space-y-0.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                            <Clock className="w-3 h-3" />
+                            <span>Cobrança Emitida (Pronta p/ Envio)</span>
+                          </span>
+                          {c.mpPaymentId && (
+                            <div className="text-[10px] text-slate-400 font-mono">PIX ID: {c.mpPaymentId}</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                          <AlertCircle className="w-3 h-3" />
+                          <span>Ainda não emitida</span>
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="py-3.5 px-3 text-right">
+                      {!hasCharge ? (
+                        <span className="text-[11px] text-slate-400 italic">
+                          Marque e clique em Emitir acima
+                        </span>
+                      ) : (
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {waHref && (
+                            <a
+                              href={waHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => handleMarkDispatched(c.id, 'WhatsApp')}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] inline-flex items-center gap-1 shadow-xs transition whitespace-nowrap"
+                              title="Abrir WhatsApp com Link Mercado Pago e PIX Copia e Cola prontos"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <span>WhatsApp</span>
+                            </a>
+                          )}
+
+                          {mailHref && (
+                            <a
+                              href={mailHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => handleMarkDispatched(c.id, 'Email')}
+                              className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-black text-[11px] inline-flex items-center gap-1 shadow-xs transition whitespace-nowrap"
+                              title="Enviar cobrança por E-mail"
+                            >
+                              <Mail className="w-3.5 h-3.5" />
+                              <span>E-mail</span>
+                            </a>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyBillingText(c)}
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
+                            title="Copiar mensagem completa com Link e PIX"
+                          >
+                            {copiedId === c.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedId === c.id ? 'Copiado!' : 'Copiar'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenQrPreview(c)}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
+                            title="Visualizar QR Code PIX e Link Checkout"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>QR / Link</span>
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* QR Code & Link Modal */}
+      {qrPreviewCandidate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                  Cobrança Mercado Pago Emitida
+                </h4>
+                <p className="text-xs text-slate-500">{qrPreviewCandidate.subscriberName}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQrPreviewCandidate(null)}
+                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between text-xs">
+              <div>
+                <div className="font-bold text-slate-700 dark:text-slate-300">{qrPreviewCandidate.planType}</div>
+                <div className="text-[10px] font-mono text-slate-400">{qrPreviewCandidate.billingExternalRef}</div>
+              </div>
+              <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">
+                R$ {qrPreviewCandidate.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+
+            {qrPreviewDataUrl && (
+              <div className="flex flex-col items-center p-4 bg-white rounded-2xl border border-slate-200">
+                <img src={qrPreviewDataUrl} alt="QR Code PIX Mercado Pago" className="w-44 h-44" />
+                <span className="text-[11px] font-bold text-slate-500 mt-2">
+                  Escaneie com o app de qualquer banco (PIX Mercado Pago)
+                </span>
+              </div>
+            )}
+
+            {qrPreviewCandidate.billingLink && (
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-500 uppercase">Link Checkout Pro (Cartão / PIX / Boleto)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={qrPreviewCandidate.billingLink}
+                    className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-mono text-slate-700 dark:text-slate-300"
+                  />
+                  <a
+                    href={qrPreviewCandidate.billingLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 rounded-xl bg-[#009ee3] hover:bg-[#0082ba] text-white text-xs font-black inline-flex items-center gap-1 shrink-0"
+                  >
+                    <span>Abrir</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => handleCopyBillingText(qrPreviewCandidate)}
+              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Copy className="w-4 h-4" />
+              <span>Copiar Cobrança Completa (Link + PIX Copia e Cola)</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

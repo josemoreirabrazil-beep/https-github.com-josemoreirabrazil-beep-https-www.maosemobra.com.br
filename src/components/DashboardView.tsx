@@ -30,15 +30,29 @@ import {
   RefreshCw,
   Briefcase,
   Send,
-  ExternalLink
+  ExternalLink,
+  FileCheck2,
+  Crown,
+  Repeat,
+  Lock
 } from 'lucide-react';
-import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser } from '../types';
+import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser, SubscriptionPlanPricing, RealSubscribersStatusResponse } from '../types';
 import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
 import { ProjectGoals } from './ProjectGoals';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { fetchSubscribersCashflow } from '../services/subscriberBilling';
+import {
+  fetchSubscribersCashflow,
+  fetchSubscriptionPlans,
+  fetchRealSubscribersStatus,
+  syncEnrolledSubscriberToServer,
+  getActiveUserSubscription,
+  hasProLaudoAccess,
+  INITIAL_PLANS,
+  setActiveUserSubscription,
+  type ActiveSubscriptionState
+} from '../services/subscriberBilling';
 import { MASTER_CREDENTIALS } from '../services/adminAuth';
 import confetti from 'canvas-confetti';
 
@@ -57,6 +71,7 @@ interface DashboardViewProps {
   onUpdateProject: (updatedProject: Project) => void;
   isAuthenticated: boolean;
   adminUser?: AdminMasterUser | null;
+  activeSubscription?: ActiveSubscriptionState;
   goals?: ProjectGoal[];
   onSaveGoal?: (goal: ProjectGoal) => void;
   onDeleteGoal?: (goalId: string) => void;
@@ -84,9 +99,30 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
     onOpenWithdrawalModal,
   } = props;
 
-  // Platform financial metrics (for Admin Master & Immediate Cashout)
+  // Platform financial metrics & available plans
   const [platformTotal, setPlatformTotal] = useState<number>(1834.80);
   const [isPlatformWithdrawing, setIsPlatformWithdrawing] = useState(false);
+  const [availablePlans, setAvailablePlans] = useState<SubscriptionPlanPricing[]>(() =>
+    [...INITIAL_PLANS].sort((a, b) => a.price - b.price)
+  );
+  const [realSubscribersStatus, setRealSubscribersStatus] = useState<RealSubscribersStatusResponse | null>(null);
+  const [isRefreshingSubscribers, setIsRefreshingSubscribers] = useState(false);
+  const [subscriberStatusFilter, setSubscriberStatusFilter] = useState<'all' | 'active_paid' | 'active_free' | 'pending' | 'mp_live'>('all');
+
+  const currentUserSub = props.activeSubscription || getActiveUserSubscription();
+  const userHasProLaudo = hasProLaudoAccess(currentUserSub);
+
+  const loadRealSubscribers = React.useCallback(async (forceRefresh = false) => {
+    setIsRefreshingSubscribers(true);
+    try {
+      const snapshot = await fetchRealSubscribersStatus(forceRefresh);
+      setRealSubscribersStatus(snapshot);
+    } catch (err) {
+      console.warn('Could not load real subscribers status', err);
+    } finally {
+      setIsRefreshingSubscribers(false);
+    }
+  }, []);
 
   React.useEffect(() => {
     fetchSubscribersCashflow().then(res => {
@@ -96,7 +132,15 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
     }).catch(err => {
       console.warn('Could not refresh cashflow summary', err);
     });
-  }, [props.adminUser]);
+
+    fetchSubscriptionPlans().then(plans => {
+      if (plans && plans.length > 0) {
+        setAvailablePlans([...plans].sort((a, b) => a.price - b.price));
+      }
+    }).catch(() => {});
+
+    loadRealSubscribers(false);
+  }, [props.adminUser, loadRealSubscribers]);
 
   const handlePlatformWithdrawal = async () => {
     if (platformTotal <= 0) {
@@ -176,6 +220,10 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   const todayLaborCount = latestRdo?.labor?.reduce((acc, curr) => acc + curr.count, 0) || 0;
 
   // Real Registered Count & Online Count
+  const enrolledSubscribersCount = realSubscribersStatus?.summary.totalEnrolledSubscribers ?? 0;
+  const activeSubscribersCount =
+    (realSubscribersStatus?.summary.activePaidSubscribers ?? 0) +
+    (realSubscribersStatus?.summary.activeFreeSubscribers ?? 0);
   const registeredCount = team.length;
   const onlineCount = 1; // 1 active user in current authenticated/local session
 
@@ -195,12 +243,21 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
   const [isMpModalOpen, setIsMpModalOpen] = useState(false);
   const [mpRefId, setMpRefId] = useState<string>('');
+  const [selectedPlanForCheckout, setSelectedPlanForCheckout] = useState<SubscriptionPlanPricing | null>(null);
+  const [mpRequirePlanSelection, setMpRequirePlanSelection] = useState<boolean>(true);
   const [isGeneratingChecklist, setIsGeneratingChecklist] = useState(false);
   const [isAnalyzingRisks, setIsAnalyzingRisks] = useState(false);
   const [riskAnalysis, setRiskAnalysis] = useState<any>(null);
-  
-  const handleOpenMpModal = () => {
+
+  const handleOpenMpModal = (plan?: SubscriptionPlanPricing) => {
     setMpRefId(`dash-${project.id}-${Date.now()}`);
+    if (plan) {
+      setSelectedPlanForCheckout(plan);
+      setMpRequirePlanSelection(false);
+    } else {
+      setSelectedPlanForCheckout(null);
+      setMpRequirePlanSelection(true);
+    }
     setIsMpModalOpen(true);
   };
   const [selectedChecklistType, setSelectedChecklistType] = useState(project.type || 'Reforma Residencial');
@@ -463,13 +520,13 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               <span>{onlineCount} On-line</span>
             </div>
 
-            {/* Quantidade Inscrito (Apenas visível se Admin Master autenticado) */}
-            {props.adminUser && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs font-bold">
-                <Users className="w-3.5 h-3.5" />
-                <span>{registeredCount} Inscritos / Cadastrados</span>
-              </div>
-            )}
+            {/* Assinantes Reais Inscritos & Ativos */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs font-bold">
+              <Users className="w-3.5 h-3.5" />
+              <span>
+                {enrolledSubscribersCount} Inscritos · {activeSubscribersCount} Ativos
+              </span>
+            </div>
 
             {/* Admin Master Global Access Button */}
             <button
@@ -498,9 +555,9 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
             {/* PIX Quick QR Code & Key */}
             <button
-              onClick={handleOpenMpModal}
+              onClick={() => handleOpenMpModal()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-bold shadow-xs hover:bg-emerald-100 transition cursor-pointer"
-              title="Chave PIX: +55 (73) 99859-9213 • Abrir QR Code"
+              title="Chave PIX: +55 (73) 99859-9213 • Escolher plano e abrir QR Code"
             >
               <QrCode className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               <span>PIX: +55 (73) 99859-9213</span>
@@ -508,9 +565,9 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
             {/* Mercado Pago Button */}
             <button
-              onClick={handleOpenMpModal}
+              onClick={() => handleOpenMpModal()}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#009ee3] hover:bg-[#0082ba] text-white text-xs font-bold shadow-xs transition cursor-pointer"
-              title="Gerar cobrança Pix ou Cartão via Mercado Pago"
+              title="Escolher plano e gerar cobrança Pix ou Cartão via Mercado Pago"
             >
               <div className="w-3.5 h-3.5 rounded bg-white text-[#009ee3] flex items-center justify-center font-black text-[8px]">
                 mp
@@ -521,11 +578,22 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
             {/* Checklist Pré-Obra */}
             <button
               onClick={generateChecklist}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-xs transition cursor-pointer whitespace-nowrap shrink-0"
               title="Gerar Checklist de Tarefas Pré-Obra com IA"
             >
               <Bot className="w-3.5 h-3.5" />
               <span>Gerar Checklist IA</span>
+            </button>
+
+            {/* Emissão de ART & Laudos */}
+            <button
+              type="button"
+              onClick={() => onNavigate('reports')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-amber-400 text-xs font-black border border-amber-500/40 shadow-xs transition cursor-pointer whitespace-nowrap shrink-0"
+              title="Abrir módulo de Emissão de ART (CREA), RRT, Laudos Técnicos e Logo do Cliente"
+            >
+              <FileCheck2 className="w-3.5 h-3.5" />
+              <span>ART & Laudos</span>
             </button>
           </div>
         </div>
@@ -542,17 +610,116 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                   Promoção de Lançamento Oficial
                 </span>
                 <span className="bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                  Inscrição Gratuita
+                  Cadastro Gratuito = Só Oportunidades
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-slate-600 dark:text-slate-300 leading-tight mt-0.5">
-                A <strong>inscrição na plataforma é 100% gratuita</strong> tanto para o <strong>cliente solicitante</strong> quanto para o <strong>profissional</strong>. O envio e a execução de orçamentos, propostas e serviços são precificados e cobrados normalmente conforme o escopo e logística de cada obra.
+                O <strong>cadastro gratuito (R$ 0,00)</strong> permite <strong>apenas a visualização das oportunidades de obras</strong>. Para liberar o acesso aos serviços da plataforma (RDO, Caixa, Propostas, ART/Laudos e WhatsApp), escolha um plano mensal ou o Plano Anual Construtor.
               </p>
             </div>
           </div>
 
-          <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300 whitespace-nowrap shrink-0 self-end sm:self-center">
-            Sem taxa de adesão ✨
+          <button
+            type="button"
+            onClick={() => handleOpenMpModal()}
+            className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-black whitespace-nowrap shrink-0 self-end sm:self-center shadow-xs transition cursor-pointer"
+          >
+            Ver Todos os Planos &amp; Escolher ✨
+          </button>
+        </div>
+
+        {/* Visible Plans & Pricing Grid (Livre Escolha para o Cliente) */}
+        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                Planos Mensais, Plano Anual Construtoras &amp; Cadastro Gratuito
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Assinaturas mensais (R$ 25,00, R$ 29,90 ou R$ 49,90/mês), <strong>Anual Construtor (R$ 499,00/ano para Construtoras, Empreiteiras e Incorporadoras)</strong> ou Cadastro Gratuito (R$ 0,00 — apenas visualização das oportunidades)
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleOpenMpModal()}
+              className="text-xs font-bold text-[#009ee3] hover:underline self-start sm:self-center cursor-pointer"
+            >
+              Abrir checkout de assinatura →
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            {availablePlans.map((plan) => {
+              const price = Number(plan.price) || 0;
+              const isFree = price === 0;
+              const isAnnual = plan.billingCycle === 'Anual';
+              return (
+                <div
+                  key={plan.id}
+                  className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 hover:border-amber-500/60 transition ${
+                    isAnnual
+                      ? 'bg-amber-500/5 dark:bg-amber-950/20 border-amber-500/40'
+                      : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/70'
+                  }`}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="font-black text-slate-900 dark:text-white">{plan.name}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                        isFree
+                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                          : isAnnual
+                          ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                          : 'bg-[#009ee3]/15 text-[#009ee3]'
+                      }`}>
+                        {isFree ? 'Só Oportunidades' : isAnnual ? 'Anual Construtoras' : 'Recorrente Mensal'}
+                      </span>
+                    </div>
+
+                    <div className={`text-xl font-black tabular-nums ${
+                      isFree
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : isAnnual
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-slate-900 dark:text-white'
+                    }`}>
+                      {isFree
+                        ? 'R$ 0,00 (Grátis)'
+                        : `R$ ${price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${isAnnual ? '/ano' : '/mês'}`}
+                    </div>
+
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
+                      {plan.targetAudience}
+                    </p>
+
+                    {plan.features && plan.features.length > 0 && (
+                      <ul className="space-y-1 pt-2 border-t border-slate-200/70 dark:border-slate-700/60 text-[11px] text-slate-600 dark:text-slate-300">
+                        {plan.features.slice(0, 3).map((feat, idx) => (
+                          <li key={idx} className="leading-snug">• {feat}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenMpModal(plan)}
+                    className={`w-full py-2 px-3 rounded-xl text-xs font-black transition cursor-pointer ${
+                      isFree
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        : isAnnual
+                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                        : 'bg-[#009ee3] hover:bg-[#0082ba] text-white'
+                    }`}
+                  >
+                    {isFree
+                      ? 'Manter Gratuito (Só Vagas)'
+                      : `Assinar — R$ ${price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${isAnnual ? '/ano' : '/mês'}`}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -616,6 +783,360 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
             </span>
           </div>
 
+        </div>
+
+        {/* 👥 STATUS DE ASSINANTES REAIS INSCRITOS E ATIVOS NO SISTEMA */}
+        <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-emerald-500" />
+                <span>Status de Assinantes Reais Inscritos e Ativos no Sistema</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Acompanhamento em tempo real dos assinantes inscritos, planos ativos e conciliação ao vivo com a API do Mercado Pago
+                {realSubscribersStatus?.checkedAt && (
+                  <span className="ml-1.5 font-mono text-[10px] text-slate-400">
+                    (Atualizado às {new Date(realSubscribersStatus.checkedAt).toLocaleTimeString('pt-BR')})
+                  </span>
+                )}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => loadRealSubscribers(true)}
+                disabled={isRefreshingSubscribers}
+                className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshingSubscribers ? 'animate-spin' : ''}`} />
+                <span>{isRefreshingSubscribers ? 'Sincronizando MP...' : 'Atualizar Status ao Vivo'}</span>
+              </button>
+
+              {props.adminUser && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('admin')}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Gerenciar Cobranças</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Current Session Active Subscription Strip */}
+          <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            userHasProLaudo
+              ? 'bg-emerald-500/10 border-emerald-500/30'
+              : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+          }`}>
+            <div className="flex items-center gap-3 text-xs">
+              <div className={`p-2 rounded-xl shrink-0 ${
+                userHasProLaudo ? 'bg-emerald-500 text-white' : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+              }`}>
+                <Crown className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-black text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
+                  <span>Sua Assinatura Atual: {currentUserSub.planName}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    currentUserSub.price > 0
+                      ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                  }`}>
+                    {currentUserSub.price > 0
+                      ? `Ativa · R$ ${currentUserSub.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${currentUserSub.billingCycle === 'Anual' || currentUserSub.price >= 400 ? '/ano' : '/mês'}`
+                      : 'Cadastro Gratuito Ativo (R$ 0,00 — Só Oportunidades)'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 flex items-center gap-1.5">
+                  {userHasProLaudo ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <span>Todos os serviços e emissão de Laudos Técnicos e ARTs liberados neste dispositivo.</span>
+                    </>
+                  ) : currentUserSub.price > 0 ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      <span>Serviços e ARTs liberados · Emissão de Laudos Técnicos exclusiva do Plano Mensal Pro (R$ 29,90/mês).</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span>Cadastro gratuito: acesso apenas à visualização das oportunidades (serviços bloqueados).</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {!userHasProLaudo && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentUserSub.price <= 0) {
+                    handleOpenMpModal();
+                  } else {
+                    const proPlan = availablePlans.find((p) => p.id === 'plan-001' || p.code === 'Mensal Pro');
+                    handleOpenMpModal(proPlan);
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-[#009ee3] hover:bg-[#0082ba] text-white text-xs font-black whitespace-nowrap shrink-0 cursor-pointer transition"
+              >
+                {currentUserSub.price <= 0 ? 'Escolher Plano & Liberar Serviços' : 'Ativar Plano Pro — R$ 29,90/mês'}
+              </button>
+            )}
+          </div>
+
+          {/* Real KPI Summary Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                Total Inscritos no Sistema
+              </span>
+              <div className="text-2xl font-black text-slate-900 dark:text-white tabular-nums mt-1">
+                {realSubscribersStatus?.summary.totalEnrolledSubscribers ?? 0}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2 font-semibold">
+                <span className="text-emerald-600 dark:text-emerald-400">
+                  {realSubscribersStatus?.summary.activePaidSubscribers ?? 0} Pagos Ativos
+                </span>
+                <span>·</span>
+                <span className="text-blue-600 dark:text-blue-400">
+                  {realSubscribersStatus?.summary.activeFreeSubscribers ?? 0} Gratuitos
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <Repeat className="w-3 h-3 text-[#009ee3]" />
+                <span>Recorrentes Mercado Pago (Ao Vivo)</span>
+              </span>
+              <div className="text-2xl font-black text-[#009ee3] tabular-nums mt-1">
+                {realSubscribersStatus?.mpLiveStats.recurringSubscriptionsActiveInMp ?? 0}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-semibold">
+                {realSubscribersStatus?.mpLiveStats.activeMpPlansCount ?? 0} plano(s) recorrente(s) ativo(s) no MP
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                Pagamentos Reais MP (Ao Vivo)
+              </span>
+              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums mt-1">
+                {realSubscribersStatus?.mpLiveStats.approvedPaymentsInMp ?? 0} Aprovados
+              </div>
+              <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 font-semibold">
+                {realSubscribersStatus?.mpLiveStats.pendingPaymentsInMp ?? 0} cobrança(s) PIX pendente(s) no MP
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                Conciliação &amp; Pendências
+              </span>
+              <div className="text-2xl font-black text-amber-600 dark:text-amber-400 tabular-nums mt-1">
+                {(realSubscribersStatus?.summary.pendingSubscribers ?? 0) + (realSubscribersStatus?.summary.overdueSubscribers ?? 0)} Pendentes
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-semibold">
+                {realSubscribersStatus?.summary.mpVerifiedPaidSubscribers ?? 0} assinante(s) liquidado(s) via MP
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            {[
+              { id: 'all', label: `Todos Inscritos (${realSubscribersStatus?.subscribers.length ?? 0})` },
+              {
+                id: 'active_paid',
+                label: `Pagantes Ativos (${realSubscribersStatus?.summary.activePaidSubscribers ?? 0})`,
+              },
+              {
+                id: 'active_free',
+                label: `Gratuitos Ativos (${realSubscribersStatus?.summary.activeFreeSubscribers ?? 0})`,
+              },
+              {
+                id: 'pending',
+                label: `Pendentes / Atraso (${(realSubscribersStatus?.summary.pendingSubscribers ?? 0) + (realSubscribersStatus?.summary.overdueSubscribers ?? 0)})`,
+              },
+              {
+                id: 'mp_live',
+                label: `Auditoria Mercado Pago ao Vivo (${realSubscribersStatus?.mpLiveStats.approvedPaymentsInMp ?? 0})`,
+              },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSubscriberStatusFilter(tab.id as any)}
+                className={`px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
+                  subscriberStatusFilter === tab.id
+                    ? 'bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Real Subscribers List or Live MP Audit Table */}
+          {subscriberStatusFilter === 'mp_live' ? (
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/70 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-slate-800 dark:text-slate-200">
+                  Pagamentos Aprovados &amp; Assinaturas Recorrentes Reais na Conta Mercado Pago
+                </span>
+                <span className="font-mono text-[11px] text-slate-500">
+                  Total MP: {realSubscribersStatus?.mpLiveStats.totalPaymentsInMp ?? 0} registros
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase text-slate-400 font-bold">
+                      <th className="py-2.5 px-3">ID Transação MP</th>
+                      <th className="py-2.5 px-3">Método / Descrição</th>
+                      <th className="py-2.5 px-3">Valor (R$)</th>
+                      <th className="py-2.5 px-3">Status Real MP</th>
+                      <th className="py-2.5 px-3">Data</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(realSubscribersStatus?.mpLiveStats.liveApprovedPayments || []).length === 0 &&
+                    (realSubscribersStatus?.mpLiveStats.liveRecurringSubscriptions || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-slate-500">
+                          Nenhum pagamento aprovado retornado na última sincronização com o Mercado Pago.
+                        </td>
+                      </tr>
+                    ) : (
+                      <>
+                        {(realSubscribersStatus?.mpLiveStats.liveRecurringSubscriptions || []).map((sub) => (
+                          <tr key={`pa-${sub.id}`} className="bg-[#009ee3]/5">
+                            <td className="py-2.5 px-3 font-mono font-bold text-[#009ee3]">{sub.id}</td>
+                            <td className="py-2.5 px-3 font-semibold text-slate-800 dark:text-slate-200">
+                              Assinatura Recorrente · {sub.reason}
+                            </td>
+                            <td className="py-2.5 px-3 font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                              R$ {Number(sub.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                                {sub.status}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-500">
+                              {sub.dateCreated ? new Date(sub.dateCreated).toLocaleDateString('pt-BR') : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                        {(realSubscribersStatus?.mpLiveStats.liveApprovedPayments || []).map((lp) => (
+                          <tr key={`lp-${lp.id}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="py-2.5 px-3 font-mono font-bold text-slate-700 dark:text-slate-200">
+                              #{lp.id}
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                              <span className="uppercase font-bold text-[10px] mr-1.5 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
+                                {lp.paymentMethodId || 'pix'}
+                              </span>
+                              {lp.description || 'Recebimento direto na conta Mercado Pago'}
+                            </td>
+                            <td className="py-2.5 px-3 font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                              R$ {Number(lp.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                                Aprovado ({lp.statusDetail || 'accredited'})
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-500 tabular-nums">
+                              {lp.dateApproved ? new Date(lp.dateApproved).toLocaleDateString('pt-BR') : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase text-slate-400 font-bold">
+                    <th className="py-2.5 px-3">Assinante Inscrito</th>
+                    <th className="py-2.5 px-3">Perfil</th>
+                    <th className="py-2.5 px-3">Plano &amp; Valor</th>
+                    <th className="py-2.5 px-3">Status Real no Sistema</th>
+                    <th className="py-2.5 px-3">Vigência / Pagamento</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {(realSubscribersStatus?.subscribers || [])
+                    .filter((sub) => {
+                      if (subscriberStatusFilter === 'active_paid') return sub.isActive && sub.amount > 0;
+                      if (subscriberStatusFilter === 'active_free') return sub.amount === 0 && sub.isActive;
+                      if (subscriberStatusFilter === 'pending') return !sub.isActive;
+                      return true;
+                    })
+                    .map((sub) => (
+                      <tr key={sub.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-slate-900 dark:text-white">{sub.subscriberName}</div>
+                          {(sub.subscriberEmail || sub.subscriberPhone) && (
+                            <div className="text-[11px] text-slate-400 mt-0.5">
+                              {sub.subscriberPhone} {sub.subscriberEmail ? `· ${sub.subscriberEmail}` : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-slate-600 dark:text-slate-300 font-medium">
+                          {sub.subscriberRole}
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="font-bold text-slate-900 dark:text-white">{sub.planType}</div>
+                          <div className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                            {sub.amount === 0 ? 'R$ 0,00 (Gratuito)' : `R$ ${sub.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/mês`}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black ${
+                              sub.verificationBadge === 'Pago Confirmado no MP'
+                                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                : sub.verificationBadge === 'Ativo no Sistema'
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                : sub.verificationBadge === 'Cadastro Gratuito Ativo'
+                                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                                : sub.verificationBadge === 'Em Atraso'
+                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                                : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                            }`}
+                          >
+                            {sub.isActive ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                            <span>{sub.verificationBadge}</span>
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+                          <div>Venc.: {sub.dueDate ? new Date(sub.dueDate + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}</div>
+                          {sub.paymentDate && (
+                            <div className="text-[10px] text-slate-400">
+                              Reg.: {new Date(sub.paymentDate + 'T12:00:00').toLocaleDateString('pt-BR')}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* AI Pre-Construction Checklist Generator Card */}
@@ -826,18 +1347,41 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               </span>
             </div>
 
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white mb-2">
-              {project.title}
-            </h2>
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="min-w-0">
+                <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
+                  {project.title}
+                </h2>
+              </div>
+              {project.clientLogoUrl && (
+                <div className="w-24 h-14 rounded-xl bg-white border border-slate-200 p-1.5 flex items-center justify-center shrink-0">
+                  <img
+                    src={project.clientLogoUrl}
+                    alt={`Logotipo ${project.clientInstitutionalName || project.clientName}`}
+                    referrerPolicy="no-referrer"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                </div>
+              )}
+            </div>
 
             <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed max-w-md mb-4">
               {latestRdo?.servicesExecuted || project.notes || 'Execução técnica em conformidade com o cronograma e especificações do projeto.'}
             </p>
 
-            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <span><strong>Cliente:</strong> {project.clientName || 'Não informado'}</span>
-              <span>•</span>
-              <span><strong>Local:</strong> {project.address || 'Canteiro Central'}</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex flex-wrap items-center gap-3">
+                <span><strong>Cliente:</strong> {project.clientInstitutionalName || project.clientName || 'Não informado'}</span>
+                <span>•</span>
+                <span><strong>Local:</strong> {project.address || 'Canteiro Central'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('reports')}
+                className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer shrink-0"
+              >
+                {project.clientLogoUrl ? 'Laudos, ARTs & Logo →' : '+ Adicionar Logo & Laudos/ARTs →'}
+              </button>
             </div>
           </div>
 
@@ -1318,14 +1862,86 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
       <MercadoPagoModal
         isOpen={isMpModalOpen}
         onClose={() => setIsMpModalOpen(false)}
-        title={`Assinatura Plano Pro - ${project.title}`}
-        amount={149.90}
-        description={`Assinatura Plano Mensal Pro (R$ 149,90) ou aporte referente ao projeto ${project.title}`}
+        title={
+          selectedPlanForCheckout
+            ? `${selectedPlanForCheckout.name} - ${project.title}`
+            : `Planos e Pagamentos - ${project.title}`
+        }
+        amount={selectedPlanForCheckout ? selectedPlanForCheckout.price : 0}
+        selectedPlanId={selectedPlanForCheckout?.id}
+        requirePlanSelection={mpRequirePlanSelection}
+        description={`Escolha o plano ideal referente ao projeto ${project.title}`}
         payerName={project.clientName || 'Cliente da Obra'}
         payerEmail={project.clientEmail || 'cliente@obra.com.br'}
         referenceId={mpRefId}
-        onPaymentSuccess={() => {
-          onOpenNewExpense();
+        onPaymentSuccess={(paymentInfo) => {
+          const nameLower = (paymentInfo.planName || '').toLowerCase();
+          let chosen: {
+            planId: string;
+            planCode: string;
+            planName: string;
+            price: number;
+            billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
+          } | null = null;
+
+          if (nameLower.includes('anual') || Math.abs(paymentInfo.amount - 499.00) < 0.5 || paymentInfo.amount >= 400) {
+            chosen = {
+              planId: 'plan-005',
+              planCode: 'Anual Construtor',
+              planName: 'Anual Construtor',
+              price: 499.00,
+              billingCycle: 'Anual',
+            };
+          } else if (Math.abs(paymentInfo.amount - 29.90) < 0.05 || nameLower.includes('mensal pro')) {
+            chosen = {
+              planId: 'plan-001',
+              planCode: 'Mensal Pro',
+              planName: 'Mensal Pro',
+              price: 29.90,
+              billingCycle: 'Mensal',
+            };
+          } else if (Math.abs(paymentInfo.amount - 49.90) < 0.05 || nameLower.includes('construtor')) {
+            chosen = {
+              planId: 'plan-002',
+              planCode: 'Mensal Construtor',
+              planName: 'Mensal Construtor',
+              price: 49.90,
+              billingCycle: 'Mensal',
+            };
+          } else if (Math.abs(paymentInfo.amount - 25.00) < 0.05 || nameLower.includes('básico')) {
+            chosen = {
+              planId: 'plan-003',
+              planCode: 'Mensal Básico',
+              planName: 'Mensal Básico',
+              price: 25.00,
+              billingCycle: 'Mensal',
+            };
+          } else if (paymentInfo.amount === 0) {
+            chosen = {
+              planId: 'plan-004',
+              planCode: 'Gratuito Lançamento',
+              planName: 'Cadastro Gratuito',
+              price: 0,
+              billingCycle: 'Gratuito',
+            };
+          } else {
+            onOpenNewExpense();
+          }
+
+          if (chosen) {
+            setActiveUserSubscription(chosen);
+            syncEnrolledSubscriberToServer({
+              subscriberName: user?.displayName || project.clientName || 'Assinante Mãos em Obra',
+              subscriberEmail: user?.email || project.clientEmail || '',
+              subscriberRole: chosen.planCode.includes('Construtor') ? 'Construtora / Empreiteiro' : 'Solicitante / Cliente',
+              planType: chosen.planCode,
+              amount: chosen.price,
+              method: paymentInfo.method === 'pix' ? 'PIX' : 'Mercado Pago',
+              transactionId: paymentInfo.paymentId,
+              mpPaymentId: paymentInfo.paymentId,
+              mpVerifiedStatus: chosen.price > 0 ? 'approved' : undefined,
+            }).then(() => loadRealSubscribers(true));
+          }
         }}
       />
 

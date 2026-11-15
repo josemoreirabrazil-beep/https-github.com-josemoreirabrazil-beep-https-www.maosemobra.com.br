@@ -152,6 +152,16 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="w-full flex items-center justify-between gap-2.5 px-4 py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-left transition shadow-xs"
             >
+              {currentProject.clientLogoUrl && (
+                <div className="w-9 h-9 rounded-xl bg-white border border-slate-200 p-1 flex items-center justify-center shrink-0">
+                  <img
+                    src={currentProject.clientLogoUrl}
+                    alt={`Logotipo ${currentProject.clientInstitutionalName || currentProject.clientName}`}
+                    referrerPolicy="no-referrer"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <Building className="w-3.5 h-3.5 text-amber-500 shrink-0" />
@@ -161,7 +171,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="text-[10px] text-slate-400 dark:text-slate-400 truncate">
-                    {currentProject.clientName || currentProject.type}
+                    {currentProject.clientInstitutionalName || currentProject.clientName || currentProject.type}
                   </span>
                   <span className="text-[10px] font-bold text-slate-900 dark:text-amber-400">
                     R$ {currentProject.budgetTotal.toLocaleString('pt-BR')}

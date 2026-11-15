@@ -2,55 +2,214 @@ import type {
   SubscriberPayment, 
   SubscriberCashflowSummary,
   SubscriberPaymentStatus,
-  SubscriptionPlanPricing 
+  SubscriptionPlanPricing,
+  LiveMercadoPagoPayment,
+  RealSubscriberStatusItem,
+  RealSubscribersStatusResponse
 } from '../types';
 import { getCachedAdminSession } from './adminAuth';
 
-const LOCAL_STORAGE_KEY = 'maos_em_obra_subscriber_payments_v2';
-const PLANS_STORAGE_KEY = 'maos_em_obra_subscription_plans_v1';
+const LOCAL_STORAGE_KEY = 'maos_em_obra_subscriber_payments_v3';
+const PLANS_STORAGE_KEY = 'maos_em_obra_subscription_plans_v5';
+const ACTIVE_SUBSCRIPTION_STORAGE_KEY = 'maos_em_obra_active_subscription_v1';
+export const SUBSCRIPTION_UPDATED_EVENT = 'maos-em-obra-subscription-updated';
 
-const INITIAL_PLANS: SubscriptionPlanPricing[] = [
+export interface ActiveSubscriptionState {
+  planId: string;
+  planCode: string;
+  planName: string;
+  price: number;
+  billingCycle?: 'Mensal' | 'Anual' | 'Gratuito';
+  activatedAt: string;
+}
+
+export function getActiveUserSubscription(): ActiveSubscriptionState {
+  try {
+    const raw = localStorage.getItem(ACTIVE_SUBSCRIPTION_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.planName) {
+        return parsed as ActiveSubscriptionState;
+      }
+    }
+  } catch {
+    // fallback to free plan
+  }
+  return {
+    planId: 'plan-004',
+    planCode: 'Gratuito Lançamento',
+    planName: 'Cadastro Gratuito',
+    price: 0,
+    activatedAt: new Date().toISOString(),
+  };
+}
+
+export function setActiveUserSubscription(sub: Partial<ActiveSubscriptionState>): ActiveSubscriptionState {
+  const next: ActiveSubscriptionState = {
+    planId: sub.planId || 'plan-004',
+    planCode: sub.planCode || 'Gratuito Lançamento',
+    planName: sub.planName || 'Cadastro Gratuito',
+    price: Number(sub.price) || 0,
+    billingCycle: sub.billingCycle || (Number(sub.price) <= 0 ? 'Gratuito' : (sub.planName || '').toLowerCase().includes('anual') || Number(sub.price) >= 400 ? 'Anual' : 'Mensal'),
+    activatedAt: sub.activatedAt || new Date().toISOString(),
+  };
+  try {
+    localStorage.setItem(ACTIVE_SUBSCRIPTION_STORAGE_KEY, JSON.stringify(next));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(SUBSCRIPTION_UPDATED_EVENT, { detail: next }));
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return next;
+}
+
+export function hasPaidServiceAccess(sub?: ActiveSubscriptionState | null): boolean {
+  const current = sub || getActiveUserSubscription();
+  const code = (current.planCode || '').toLowerCase();
+  const name = (current.planName || '').toLowerCase();
+  if (Number(current.price) > 0) return true;
+  if (['plan-001', 'plan-002', 'plan-003', 'plan-005'].includes(current.planId)) return true;
+  if (
+    !code.includes('gratuito') &&
+    !name.includes('gratuito') &&
+    (code.includes('mensal') || code.includes('anual') || name.includes('pro') || name.includes('construtor') || name.includes('básico'))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function hasProLaudoAccess(sub?: ActiveSubscriptionState | null): boolean {
+  const current = sub || getActiveUserSubscription();
+  const code = (current.planCode || '').toLowerCase();
+  const name = (current.planName || '').toLowerCase();
+  return (
+    current.planId === 'plan-001' ||
+    code === 'mensal pro' ||
+    name.includes('mensal pro') ||
+    code === 'pro'
+  );
+}
+
+export const REDUCED_PLAN_PRICES: Record<string, number> = {
+  'Mensal Básico': 25.00,
+  'Mensal Pro': 29.90,
+  'Mensal Construtor': 49.90,
+  'Anual Construtor': 499.00,
+  'Gratuito Lançamento': 0.00,
+  'Cadastro Gratuito': 0.00,
+};
+
+export function getReducedPlanPrice(planType?: string, currentAmount?: number): number {
+  const normalized = (planType || '').toLowerCase().trim();
+  if (!normalized) return Number(currentAmount) || 0;
+  if (normalized.includes('personalizado')) return Number(currentAmount) || 0;
+  if (normalized.includes('gratuito') || normalized.includes('isento')) return 0;
+  if (normalized.includes('anual')) return 499.00;
+  if (normalized.includes('construtor') || normalized.includes('empreit') || normalized.includes('incorp')) return 49.90;
+  if (normalized.includes('básico') || normalized.includes('basico')) return 25.00;
+  if (normalized.includes('pro')) return 29.90;
+  return Number(currentAmount) || 0;
+}
+
+export function normalizePendingSubscriberCharges(payments: SubscriberPayment[]): {
+  updatedPayments: SubscriberPayment[];
+  adjustedCount: number;
+} {
+  let adjustedCount = 0;
+  const updatedPayments = payments.map((p) => {
+    const isPendingOrOverdue = p.status === 'Pendente' || p.status === 'Atrasado';
+    const isPaidInMp = p.mpVerifiedStatus === 'approved' || p.billingStatus === 'Pago no MP';
+    if (!isPendingOrOverdue || isPaidInMp) {
+      return p;
+    }
+
+    const targetPrice = getReducedPlanPrice(p.planType, p.amount);
+    if (Math.abs((Number(p.amount) || 0) - targetPrice) <= 0.009) {
+      return p;
+    }
+
+    adjustedCount++;
+    const previousFormatted = (Number(p.amount) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    const targetFormatted = targetPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+    return {
+      ...p,
+      amount: targetPrice,
+      status: targetPrice <= 0 ? ('Isento / Cortesia' as const) : p.status,
+      billingStatus: targetPrice <= 0 ? undefined : ('Não Emitida' as const),
+      billingLink: undefined,
+      pixTicketUrl: undefined,
+      pixCopyPaste: undefined,
+      mpPreferenceId: undefined,
+      mpPaymentId: undefined,
+      billingMessage: undefined,
+      notes: `Valor pendente ajustado de R$ ${previousFormatted} para R$ ${targetFormatted} (${p.planType}).`,
+    };
+  });
+
+  return { updatedPayments, adjustedCount };
+}
+
+export const INITIAL_PLANS: SubscriptionPlanPricing[] = [
   {
     id: 'plan-001',
     name: 'Mensal Pro',
     code: 'Mensal Pro',
-    price: 149.90,
+    price: 29.90,
     billingCycle: 'Mensal',
+    isRecurring: true,
     targetAudience: 'Prestadores, Técnicos, Lojas e Profissionais Independentes',
-    features: ['Obras ilimitadas', 'RDOs e Diárias digitais', 'Controle financeiro de caixa', 'Suporte prioritário via WhatsApp'],
+    features: ['Exclusivo: Emissão de Laudos Técnicos e Vistorias', 'Assinatura mensal recorrente Mercado Pago', 'Acesso completo aos serviços, RDOs e financeiro'],
     activeSubscribersCount: 3,
     updatedAt: new Date().toISOString().split('T')[0],
   },
   {
     id: 'plan-002',
-    name: 'Anual Construtor',
-    code: 'Anual Construtor',
-    price: 1490.00,
-    billingCycle: 'Anual',
+    name: 'Mensal Construtor',
+    code: 'Mensal Construtor',
+    price: 49.90,
+    billingCycle: 'Mensal',
+    isRecurring: true,
     targetAudience: 'Construtoras, Empreiteiras e Incorporadoras',
-    features: ['2 meses grátis (economia de R$ 300)', 'Exportação de relatórios avançados (PDF/Excel)', 'Backup em nuvem dedicado', 'Até 5 subcontas de engenheiros/mestres'],
+    features: ['Assinatura mensal recorrente Mercado Pago', 'Até 5 subcontas e backup em nuvem', 'Registro de ARTs/RRTs e relatórios PDF/Excel'],
     activeSubscribersCount: 1,
     updatedAt: new Date().toISOString().split('T')[0],
   },
   {
+    id: 'plan-005',
+    name: 'Anual Construtor',
+    code: 'Anual Construtor',
+    price: 499.00,
+    billingCycle: 'Anual',
+    isRecurring: true,
+    targetAudience: 'Construtoras, Empreiteiras e Incorporadoras (Plano Anual)',
+    features: ['Plano anual com economia de 2 meses no Mercado Pago', 'Multiobras ilimitadas, até 15 subcontas e backup Drive', 'Acesso total a serviços, ARTs/RRTs, RDOs e relatórios'],
+    activeSubscribersCount: 0,
+    updatedAt: new Date().toISOString().split('T')[0],
+  },
+  {
     id: 'plan-003',
-    name: 'Taxa de Proposta / Uso por Obra',
-    code: 'Taxa de Proposta / Uso',
-    price: 45.00,
-    billingCycle: 'Por Uso',
+    name: 'Mensal Básico',
+    code: 'Mensal Básico',
+    price: 25.00,
+    billingCycle: 'Mensal',
+    isRecurring: true,
     targetAudience: 'Profissionais avulsos e orçamentistas',
-    features: ['Liberação pontual por obra/proposta enviada', 'Sem mensalidade fixa', 'Acesso completo às ferramentas da obra'],
+    features: ['Assinatura mensal recorrente Mercado Pago', 'Envio mensal de propostas e contato WhatsApp', 'Ferramentas essenciais da obra'],
     activeSubscribersCount: 1,
     updatedAt: new Date().toISOString().split('T')[0],
   },
   {
     id: 'plan-004',
-    name: 'Gratuito Lançamento',
+    name: 'Cadastro Gratuito',
     code: 'Gratuito Lançamento',
     price: 0.00,
     billingCycle: 'Gratuito',
-    targetAudience: 'Clientes solicitantes e novos usuários da fase de lançamento',
-    features: ['Cadastros de projetos iniciais', 'Envio de solicitações para prestadores', 'Acesso à vitrine de lojas'],
+    isRecurring: false,
+    targetAudience: 'Visitantes — apenas visualização das oportunidades',
+    features: ['Apenas visualização das oportunidades de obras abertas', 'Sem acesso aos serviços (RDO, Caixa, Propostas, WhatsApp)', 'Assine um plano pago a qualquer momento para liberar serviços'],
     activeSubscribersCount: 2,
     updatedAt: new Date().toISOString().split('T')[0],
   }
@@ -121,7 +280,7 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 99123-4567',
     subscriberRole: 'Técnico / Projetista',
     planType: 'Mensal Pro',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Aprovado',
     paymentDate: '2026-08-25',
@@ -137,14 +296,14 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberEmail: 'contato@bahiasulconstrutora.com.br',
     subscriberPhone: '(73) 98844-3322',
     subscriberRole: 'Construtora / Empreiteiro',
-    planType: 'Anual Construtor',
-    amount: 1490.00,
+    planType: 'Mensal Construtor',
+    amount: 49.90,
     method: 'Mercado Pago',
     status: 'Aprovado',
     paymentDate: '2026-08-10',
-    dueDate: '2027-08-10',
-    reference: 'Plano Anual Construtor Master (12 meses + Drive Backup)',
-    notes: 'Processado via Mercado Pago Checkout Pro (Cartão de Crédito 12x).',
+    dueDate: '2026-09-10',
+    reference: 'Plano Mensal Construtor Master (Multiobras + Drive Backup)',
+    notes: 'Processado via Mercado Pago Checkout Pro.',
     transactionId: 'MP-PREF-9948172635',
     projectCount: 12,
   },
@@ -155,7 +314,7 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 99911-8877',
     subscriberRole: 'Loja / Fornecedor',
     planType: 'Mensal Pro',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Aprovado',
     paymentDate: '2026-08-18',
@@ -206,7 +365,7 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 98877-0099',
     subscriberRole: 'Técnico / Projetista',
     planType: 'Mensal Pro',
-    amount: 149.90,
+    amount: 29.90,
     method: 'PIX',
     status: 'Pendente',
     paymentDate: '2026-08-28',
@@ -222,14 +381,14 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberEmail: 'contato@eletricasantos.com.br',
     subscriberPhone: '(73) 99188-4455',
     subscriberRole: 'Prestador de Serviço',
-    planType: 'Taxa de Proposta / Uso',
-    amount: 45.00,
+    planType: 'Mensal Básico',
+    amount: 25.00,
     method: 'Mercado Pago',
     status: 'Aprovado',
     paymentDate: '2026-08-29',
-    dueDate: '2026-08-29',
-    reference: 'Taxa de Envio de Proposta Comercial Obra Residencial',
-    notes: 'Taxa de intermediação aprovada via Mercado Pago.',
+    dueDate: '2026-09-29',
+    reference: 'Assinatura Mensal Básico - Propostas & Ferramentas de Obra',
+    notes: 'Assinatura mensal aprovada via Mercado Pago.',
     transactionId: 'MP-FEE-881920',
     projectCount: 1,
   }
@@ -242,7 +401,15 @@ function getStoredPayments(): SubscriberPayment[] {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_LOCAL_PAYMENTS));
       return INITIAL_LOCAL_PAYMENTS;
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const { updatedPayments, adjustedCount } = normalizePendingSubscriberCharges(parsed);
+      if (adjustedCount > 0) {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedPayments));
+      }
+      return updatedPayments;
+    }
+    return INITIAL_LOCAL_PAYMENTS;
   } catch {
     return INITIAL_LOCAL_PAYMENTS;
   }
@@ -286,9 +453,9 @@ export async function fetchSubscribersCashflow(): Promise<{
   const totalCollected = approved.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const pendingAmount = pending.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   
-  const monthlySubs = approved.filter(p => p.planType === 'Mensal Pro').reduce((a, b) => a + Number(b.amount), 0);
-  const annualSubs = approved.filter(p => p.planType === 'Anual Construtor').reduce((a, b) => a + Number(b.amount) / 12, 0);
-  const monthlyRecurringRevenue = monthlySubs + annualSubs;
+  const monthlyRecurringRevenue = approved
+    .filter(p => Number(p.amount) > 0)
+    .reduce((a, b) => a + Number(b.amount), 0);
 
   const totalSubscribers = payments.length;
   const freeTierSubscribers = payments.filter(p => p.planType === 'Gratuito Lançamento' || p.status === 'Isento / Cortesia').length;
@@ -454,3 +621,295 @@ export async function deleteSubscriberPayment(id: string): Promise<boolean> {
   saveStoredPayments(filtered);
   return true;
 }
+
+export interface EmittedBillingCharge {
+  id: string;
+  subscriberName: string;
+  subscriberEmail: string;
+  subscriberPhone: string;
+  subscriberRole: string;
+  planType: string;
+  amount: number;
+  dueDate: string;
+  billingExternalRef: string;
+  billingLink: string;
+  pixTicketUrl: string;
+  pixCopyPaste: string;
+  mpPreferenceId: string;
+  mpPaymentId: string | number;
+  billingMessage: string;
+  mode: 'live' | 'partial' | 'fallback';
+  billingEmittedAt: string;
+}
+
+export async function fetchLiveMercadoPagoPayments(explicitToken?: string): Promise<{
+  success: boolean;
+  totalInMercadoPago: number;
+  approvedCount: number;
+  pendingCount: number;
+  subscriberMatchedApprovedCount: number;
+  reconciledCount: number;
+  payments: LiveMercadoPagoPayment[];
+  subscriberPayments?: SubscriberPayment[];
+}> {
+  const token = explicitToken || getCachedAdminSession()?.token;
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch('/api/mercadopago/live-payments', { headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Erro ao consultar pagamentos ao vivo do Mercado Pago');
+  }
+  if (Array.isArray(data.subscriberPayments)) {
+    saveStoredPayments(data.subscriberPayments);
+  }
+  return data;
+}
+
+export async function emitSubscribersBillingBatch(
+  subscribers: Partial<SubscriberPayment>[],
+  explicitToken?: string
+): Promise<{
+  success: boolean;
+  totalEmitted: number;
+  livePreferencesCount: number;
+  livePixCount: number;
+  emittedCharges: EmittedBillingCharge[];
+  subscriberPayments: SubscriberPayment[];
+}> {
+  const token = explicitToken || getCachedAdminSession()?.token;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch('/api/admin/subscribers-billing/emit-batch', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ subscribers }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Erro ao emitir cobranças no Mercado Pago');
+  }
+
+  if (Array.isArray(data.subscriberPayments)) {
+    saveStoredPayments(data.subscriberPayments);
+  }
+  return data;
+}
+
+export async function adjustPendingSubscribersBilling(
+  options?: {
+    reemitMercadoPago?: boolean;
+    updates?: Array<{ id: string; planType?: string; amount?: number }>;
+  },
+  explicitToken?: string
+): Promise<{
+  success: boolean;
+  adjustedCount: number;
+  adjustedIds: string[];
+  adjustedDetails: Array<{
+    id: string;
+    subscriberName: string;
+    planType: string;
+    previousAmount: number;
+    newAmount: number;
+  }>;
+  reemittedCount: number;
+  livePreferencesCount: number;
+  livePixCount: number;
+  subscriberPayments: SubscriberPayment[];
+}> {
+  const token = explicitToken || getCachedAdminSession()?.token;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const bodyPayload = {
+    reemitMercadoPago: options?.reemitMercadoPago !== false,
+    updates: options?.updates || [],
+  };
+
+  try {
+    const res = await fetch('/api/admin/subscribers-billing/adjust-pending', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(bodyPayload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao ajustar cobranças pendentes.');
+    }
+    if (Array.isArray(data.subscriberPayments)) {
+      saveStoredPayments(data.subscriberPayments);
+    }
+    return data;
+  } catch (err) {
+    // Fallback local normalization if offline or unauthenticated
+    const local = getStoredPayments();
+    const { updatedPayments, adjustedCount } = normalizePendingSubscriberCharges(local);
+    saveStoredPayments(updatedPayments);
+    if (err instanceof Error && err.message.includes('Acesso restrito')) {
+      throw err;
+    }
+    return {
+      success: true,
+      adjustedCount,
+      adjustedIds: [],
+      adjustedDetails: [],
+      reemittedCount: 0,
+      livePreferencesCount: 0,
+      livePixCount: 0,
+      subscriberPayments: updatedPayments,
+    };
+  }
+}
+
+export async function markSubscribersBillingSent(
+  subscriberIds: string[],
+  channel: 'WhatsApp' | 'Email' | 'Link Copiado',
+  explicitToken?: string
+): Promise<{ success: boolean; updatedCount: number; subscriberPayments?: SubscriberPayment[] }> {
+  const token = explicitToken || getCachedAdminSession()?.token;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const res = await fetch('/api/admin/subscribers-billing/mark-sent', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ subscriberIds, channel }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      if (Array.isArray(data.subscriberPayments)) {
+        saveStoredPayments(data.subscriberPayments);
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn('Fallback local mark-sent update:', err);
+  }
+
+  const local = getStoredPayments();
+  const nowIso = new Date().toISOString();
+  const updated = local.map((p) =>
+    subscriberIds.includes(p.id)
+      ? {
+          ...p,
+          billingStatus: p.billingStatus === 'Pago no MP' ? ('Pago no MP' as const) : ('Enviada' as const),
+          billingSentAt: nowIso,
+          billingChannel: channel,
+        }
+      : p
+  );
+  saveStoredPayments(updated);
+  return { success: true, updatedCount: subscriberIds.length, subscriberPayments: updated };
+}
+
+export async function fetchRealSubscribersStatus(forceRefresh = false): Promise<RealSubscribersStatusResponse> {
+  const token = getCachedAdminSession()?.token;
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const query = forceRefresh ? '?refresh=1' : '';
+    const res = await fetch(`/api/subscribers/real-status${query}`, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.subscribers) {
+        return data as RealSubscribersStatusResponse;
+      }
+    }
+  } catch (err) {
+    console.warn('Fallback to local subscriber status snapshot:', err);
+  }
+
+  const local = getStoredPayments();
+  const activePaid = local.filter((s) => s.status === 'Aprovado' && Number(s.amount) > 0).length;
+  const activeFree = local.filter((s) => s.planType === 'Gratuito Lançamento' || s.status === 'Isento / Cortesia').length;
+  const pending = local.filter((s) => s.status === 'Pendente').length;
+  const overdue = local.filter((s) => s.status === 'Atrasado').length;
+  const mpVerified = local.filter((s) => s.mpVerifiedStatus === 'approved' || s.billingStatus === 'Pago no MP').length;
+
+  const mapped: RealSubscriberStatusItem[] = local.map((s) => {
+    const isFree = s.planType === 'Gratuito Lançamento' || s.status === 'Isento / Cortesia';
+    const isPaidActive = s.status === 'Aprovado' && Number(s.amount) > 0;
+    const isMpVerified = s.mpVerifiedStatus === 'approved' || s.billingStatus === 'Pago no MP';
+    let verificationBadge: RealSubscriberStatusItem['verificationBadge'] = 'Cobrança Pendente';
+    if (s.status === 'Cancelado') verificationBadge = 'Cancelado';
+    else if (s.status === 'Atrasado') verificationBadge = 'Em Atraso';
+    else if (isFree) verificationBadge = 'Cadastro Gratuito Ativo';
+    else if (isPaidActive && isMpVerified) verificationBadge = 'Pago Confirmado no MP';
+    else if (isPaidActive) verificationBadge = 'Ativo no Sistema';
+
+    return {
+      id: s.id,
+      subscriberName: s.subscriberName,
+      subscriberEmail: s.subscriberEmail,
+      subscriberPhone: s.subscriberPhone,
+      subscriberRole: s.subscriberRole,
+      planType: s.planType,
+      amount: Number(s.amount) || 0,
+      method: s.method,
+      status: s.status,
+      paymentDate: s.paymentDate,
+      dueDate: s.dueDate,
+      billingStatus: s.billingStatus,
+      mpVerifiedStatus: s.mpVerifiedStatus,
+      mpPaymentId: s.mpPaymentId,
+      projectCount: s.projectCount || 1,
+      isActive: isPaidActive || isFree,
+      verificationBadge,
+    };
+  });
+
+  return {
+    success: true,
+    checkedAt: new Date().toISOString(),
+    summary: {
+      totalEnrolledSubscribers: local.length,
+      activePaidSubscribers: activePaid,
+      activeFreeSubscribers: activeFree,
+      pendingSubscribers: pending,
+      overdueSubscribers: overdue,
+      mpVerifiedPaidSubscribers: mpVerified,
+    },
+    mpLiveStats: {
+      configured: false,
+      totalPaymentsInMp: 0,
+      approvedPaymentsInMp: 0,
+      pendingPaymentsInMp: 0,
+      recurringSubscriptionsActiveInMp: 0,
+      recurringSubscriptionsPendingInMp: 0,
+      activeMpPlansCount: 0,
+      liveApprovedPayments: [],
+      liveRecurringSubscriptions: [],
+    },
+    subscribers: mapped,
+  };
+}
+
+export async function syncEnrolledSubscriberToServer(payload: {
+  subscriberName: string;
+  subscriberEmail?: string;
+  subscriberPhone?: string;
+  subscriberRole?: string;
+  planType: string;
+  amount: number;
+  method?: string;
+  transactionId?: string | number;
+  mpPaymentId?: string | number;
+  mpVerifiedStatus?: string;
+}): Promise<void> {
+  try {
+    await fetch('/api/subscribers/enroll-active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // Non-blocking sync
+  }
+}
+

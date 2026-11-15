@@ -6,6 +6,9 @@ export interface Project {
   title: string;
   clientName: string;
   clientEmail?: string;
+  clientInstitutionalName?: string;
+  clientDocument?: string;
+  clientLogoUrl?: string;
   address: string;
   type: ProjectType;
   budgetTotal: number;
@@ -278,9 +281,10 @@ export type SubscriberRole =
 
 export type SubscriberPlan = 
   | 'Gratuito Lançamento' 
+  | 'Mensal Básico'
   | 'Mensal Pro' 
-  | 'Anual Construtor' 
-  | 'Taxa de Proposta / Uso' 
+  | 'Mensal Construtor' 
+  | 'Anual Construtor'
   | 'Personalizado';
 
 export type SubscriberPaymentStatus = 
@@ -296,6 +300,12 @@ export type SubscriberPaymentMethod =
   | 'Cartão de Crédito' 
   | 'Boleto' 
   | 'Dinheiro';
+
+export type SubscriberBillingStatus =
+  | 'Não Emitida'
+  | 'Cobrança Emitida'
+  | 'Enviada'
+  | 'Pago no MP';
 
 export interface SubscriberPayment {
   id: string;
@@ -313,6 +323,33 @@ export interface SubscriberPayment {
   notes?: string;
   transactionId?: string;
   projectCount?: number;
+  billingStatus?: SubscriberBillingStatus;
+  billingLink?: string;
+  pixTicketUrl?: string;
+  pixCopyPaste?: string;
+  mpPreferenceId?: string;
+  mpPaymentId?: string | number;
+  billingExternalRef?: string;
+  billingEmittedAt?: string;
+  billingSentAt?: string;
+  billingChannel?: 'WhatsApp' | 'Email' | 'Link Copiado';
+  billingMessage?: string;
+  mpVerifiedStatus?: string;
+}
+
+export interface LiveMercadoPagoPayment {
+  id: string | number;
+  status: string;
+  statusDetail?: string;
+  amount: number;
+  description?: string;
+  externalReference?: string;
+  payerEmail?: string;
+  payerName?: string;
+  paymentMethodId?: string;
+  dateCreated?: string;
+  dateApproved?: string;
+  ticketUrl?: string;
 }
 
 export interface SubscriberCashflowSummary {
@@ -325,12 +362,71 @@ export interface SubscriberCashflowSummary {
   overdueSubscribers: number;
 }
 
+export interface RealSubscriberStatusItem {
+  id: string;
+  subscriberName: string;
+  subscriberEmail?: string;
+  subscriberPhone?: string;
+  subscriberRole: SubscriberRole;
+  planType: SubscriberPlan | string;
+  amount: number;
+  method: SubscriberPaymentMethod | string;
+  status: SubscriberPaymentStatus | string;
+  paymentDate: string;
+  dueDate: string;
+  billingStatus?: SubscriberBillingStatus;
+  mpVerifiedStatus?: string;
+  mpPaymentId?: string | number;
+  projectCount?: number;
+  isActive: boolean;
+  verificationBadge:
+    | 'Pago Confirmado no MP'
+    | 'Ativo no Sistema'
+    | 'Cadastro Gratuito Ativo'
+    | 'Cobrança Pendente'
+    | 'Em Atraso'
+    | 'Cancelado';
+}
+
+export interface RealSubscribersStatusResponse {
+  success: boolean;
+  checkedAt: string;
+  summary: {
+    totalEnrolledSubscribers: number;
+    activePaidSubscribers: number;
+    activeFreeSubscribers: number;
+    pendingSubscribers: number;
+    overdueSubscribers: number;
+    mpVerifiedPaidSubscribers: number;
+  };
+  mpLiveStats: {
+    configured: boolean;
+    totalPaymentsInMp: number;
+    approvedPaymentsInMp: number;
+    pendingPaymentsInMp: number;
+    recurringSubscriptionsActiveInMp: number;
+    recurringSubscriptionsPendingInMp: number;
+    activeMpPlansCount: number;
+    liveApprovedPayments: LiveMercadoPagoPayment[];
+    liveRecurringSubscriptions: Array<{
+      id: string;
+      reason: string;
+      status: string;
+      amount: number;
+      payerEmail?: string;
+      dateCreated?: string;
+    }>;
+  };
+  subscribers: RealSubscriberStatusItem[];
+}
+
 export interface SubscriptionPlanPricing {
   id: string;
   name: string;
   code: string;
   price: number;
-  billingCycle: 'Mensal' | 'Anual' | 'Por Uso' | 'Gratuito';
+  billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
+  isRecurring?: boolean;
   targetAudience: string;
   features: string[];
   activeSubscribersCount: number;
@@ -457,5 +553,212 @@ export interface InvitationTemplate {
   body: string;
 }
 
+export type TechnicalDocumentType =
+  | 'Laudo Técnico'
+  | 'ART (CREA)'
+  | 'RRT (CAU)'
+  | 'TRT (CFT/CRT)'
+  | 'Vistoria Cautelar'
+  | 'Laudo de Reforma (NBR 16280)';
 
+export type TechnicalDocumentStatus = 'Rascunho' | 'Emitido' | 'Registrado' | 'Arquivado';
+
+export interface TechnicalDocument {
+  id: string;
+  projectId: string;
+  docType: TechnicalDocumentType;
+  documentNumber: string;
+  title: string;
+  status: TechnicalDocumentStatus;
+  issueDate: string;
+  validityDate?: string;
+  clientName: string;
+  clientInstitutionalName?: string;
+  clientDocument?: string;
+  clientLogoUrl?: string;
+  propertyAddress: string;
+  professionalName: string;
+  professionalTitle: string;
+  councilType: 'CREA' | 'CAU' | 'CFT' | 'Outro';
+  councilNumber: string;
+  rnpNumber?: string;
+  artParticipationType?: 'Individual' | 'Coautoria' | 'Corresponsabilidade' | 'Equipe';
+  technicalActivity?: string;
+  contractValue?: number;
+  feeAmount?: number;
+  scopeSummary: string;
+  methodologyAndNorms: string;
+  findingsAndDiagnosis: string;
+  conclusionAndRecommendations: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebServiceCnaeActivity {
+  code: string;
+  description: string;
+  lc116Code: string;
+  lc116Description: string;
+  issRate: number;
+  category: 'Serviços Web';
+  enabled: boolean;
+  isPrimary?: boolean;
+  customEndpoint?: string;
+}
+
+export interface DigitalCertificateProfile {
+  id: string;
+  companyName: string;
+  cnpj: string;
+  cnpjFormatted: string;
+  certificateType: string;
+  status: 'Ativo (Perfil A1 Vinculado)' | 'Ativo (.PFX Validado ICP-Brasil)' | 'Expirado' | 'Substituir';
+  hasUploadedPfx: boolean;
+  fileName?: string;
+  subjectName: string;
+  issuerName: string;
+  serialNumber: string;
+  thumbprintSha256: string;
+  validFrom: string;
+  validTo: string;
+  uploadedAt?: string;
+  lastVerifiedAt: string;
+  cnpjMatchesEmitter: boolean;
+}
+
+export type FiscalApiProviderId =
+  | 'prefeitura_abrasf_soap'
+  | 'portal_nacional_nfse'
+  | 'focus_nfe'
+  | 'nfe_io'
+  | 'plugnotas'
+  | 'webhook_custom';
+
+export interface FiscalApiIntegrationConfig {
+  provider: FiscalApiProviderId;
+  providerLabel: string;
+  autoTransmitToProvider: boolean;
+  productionEndpoint: string;
+  homologacaoEndpoint: string;
+  soapAction: string;
+  useStoredCertificateMtls: boolean;
+  hasApiToken: boolean;
+  apiTokenMasked?: string;
+  apiCompanyId: string;
+  customHeaderName: string;
+  lastConnectionTestAt?: string;
+  lastConnectionStatus?: 'Conectado' | 'Falha na Conexão' | 'Não Testado';
+  lastConnectionMessage?: string;
+  lastCertificateSyncAt?: string;
+}
+
+export interface FiscalTransmissionInfo {
+  provider: FiscalApiProviderId;
+  providerLabel: string;
+  transmissionStatus:
+    | 'Autorizada na API'
+    | 'Transmitida (Aguardando Retorno)'
+    | 'Rejeitada pela API'
+    | 'Assinada Localmente (Aguardando Conexão API)';
+  usedStoredCertificateMtls: boolean;
+  protocolNumber?: string;
+  externalInvoiceId?: string;
+  externalPdfUrl?: string;
+  externalXmlUrl?: string;
+  httpStatus?: number;
+  requestEndpoint?: string;
+  responseMessage?: string;
+  lastAttemptAt?: string;
+  authorizedAt?: string;
+}
+
+export interface FiscalTransmissionLog {
+  id: string;
+  timestamp: string;
+  nfseId?: string;
+  nfseNumber?: string;
+  provider: FiscalApiProviderId;
+  providerLabel: string;
+  action: 'EMITIR_NFSE' | 'TESTE_CONEXAO' | 'SINCRONIZAR_CERTIFICADO' | 'CANCELAR_NFSE';
+  endpoint: string;
+  usedMtlsCertificate: boolean;
+  success: boolean;
+  httpStatus?: number;
+  protocolNumber?: string;
+  message: string;
+}
+
+export interface FiscalConfiguration {
+  autoEmitOnPayment: boolean;
+  environment: 'homologacao' | 'producao';
+  regimeTributario: 'Simples Nacional' | 'MEI' | 'Lucro Presumido' | 'Lucro Real';
+  inscricaoMunicipal: string;
+  municipioNome: string;
+  municipioIbge: string;
+  uf: string;
+  rpsSeries: string;
+  nextRpsNumber: number;
+  nextNfseNumber: number;
+  defaultAliquotaIss: number;
+  defaultWebActivityCode: string;
+  serviceDescriptionTemplate: string;
+  emailNotificationToClient: boolean;
+  restrictToWebActivitiesOnly: true;
+  companyName: string;
+  cnpj: string;
+  cnpjFormatted: string;
+  certificateVaultEncrypted?: boolean;
+  webActivities: WebServiceCnaeActivity[];
+  certificate: DigitalCertificateProfile;
+  apiIntegration?: FiscalApiIntegrationConfig;
+}
+
+export interface FiscalNfseRecord {
+  id: string;
+  nfseNumber: string;
+  rpsNumber: number;
+  rpsSeries: string;
+  verificationCode: string;
+  status: 'Autorizada' | 'Cancelada' | 'Erro';
+  environment: 'homologacao' | 'producao';
+  issuedAt: string;
+  competenceDate: string;
+  prestadorName: string;
+  prestadorCnpj: string;
+  prestadorIm?: string;
+  tomadorName: string;
+  tomadorEmail?: string;
+  tomadorDocument?: string;
+  tomadorRole?: string;
+  cnaeCode: string;
+  cnaeDescription: string;
+  lc116Code: string;
+  serviceDescription: string;
+  grossAmount: number;
+  aliquotaIss: number;
+  issAmount: number;
+  netAmount: number;
+  paymentId?: string;
+  paymentReference?: string;
+  triggerSource: 'Automático (Pagamento Aprovado)' | 'Automático (Webhook Mercado Pago)' | 'Emissão Manual' | 'Emissão em Lote';
+  certificateSubject: string;
+  certificateThumbprint: string;
+  xmlSignedDigest: string;
+  xmlContent: string;
+  transmission?: FiscalTransmissionInfo;
+  cancelledAt?: string;
+  cancelReason?: string;
+}
+
+export interface FiscalNfseSummary {
+  totalAuthorizedCount: number;
+  totalCancelledCount: number;
+  totalAuthorizedAmount: number;
+  totalIssAmount: number;
+  autoIssuedCount: number;
+  approvedPaymentsPendingNfse: number;
+  transmittedAuthorizedCount?: number;
+  pendingTransmissionCount?: number;
+  rejectedTransmissionCount?: number;
+}
 

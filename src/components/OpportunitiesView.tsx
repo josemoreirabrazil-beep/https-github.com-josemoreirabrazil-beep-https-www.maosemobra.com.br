@@ -29,7 +29,8 @@ import {
   ThumbsDown,
   MessageCircle,
   SlidersHorizontal,
-  ChevronDown
+  ChevronDown,
+  Lock
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import type { 
@@ -45,8 +46,20 @@ import {
   loadServiceProviders, 
   saveServiceProviders 
 } from '../services/storage';
+import { hasPaidServiceAccess } from '../services/subscriberBilling';
+import { getCachedAdminSession } from '../services/adminAuth';
 
-export const OpportunitiesView: React.FC = () => {
+interface OpportunitiesViewProps {
+  hasServiceAccess?: boolean;
+  onRequirePaidPlan?: () => void;
+}
+
+export const OpportunitiesView: React.FC<OpportunitiesViewProps> = ({
+  hasServiceAccess,
+  onRequirePaidPlan,
+}) => {
+  const canUseServices = hasServiceAccess ?? (hasPaidServiceAccess() || Boolean(getCachedAdminSession()));
+
   // Main Panel Mode: Opportunities vs Providers
   const [activeMode, setActiveMode] = useState<'opportunities' | 'providers'>('opportunities');
 
@@ -468,8 +481,45 @@ export const OpportunitiesView: React.FC = () => {
     5: '5 Estrelas - Excelente!'
   };
 
+  const requireServicePlan = (actionLabel: string) => {
+    if (onRequirePaidPlan) {
+      onRequirePaidPlan();
+      return;
+    }
+    setNotificationMsg(
+      `Ação "${actionLabel}" bloqueada no Cadastro Gratuito. Cadastros gratuitos possuem acesso apenas à visualização das oportunidades — assine um plano pago para liberar os serviços.`
+    );
+    setTimeout(() => setNotificationMsg(null), 6000);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in pb-16">
+      {/* Free Tier Opportunities-Only Notice Banner */}
+      {!canUseServices && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-amber-500 text-slate-950 shrink-0">
+              <Lock className="w-4 h-4" />
+            </div>
+            <div className="text-xs">
+              <div className="font-black text-slate-900 dark:text-white uppercase tracking-wide">
+                Cadastro Gratuito — Apenas Visualização das Oportunidades
+              </div>
+              <p className="text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                Você pode consultar e filtrar todas as oportunidades abertas gratuitamente. Para <strong>publicar vagas, cadastrar perfil, enviar propostas no WhatsApp ou contratar prestadores</strong>, escolha um plano mensal (a partir de R$ 25,00/mês) ou anual para construtoras.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => requireServicePlan('Desbloquear Serviços')}
+            className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs whitespace-nowrap shrink-0 shadow-sm transition cursor-pointer"
+          >
+            Assinar Plano &amp; Liberar Serviços
+          </button>
+        </div>
+      )}
+
       {/* Toast Notification Alert */}
       {notificationMsg && (
         <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center justify-between shadow-lg">
@@ -508,23 +558,31 @@ export const OpportunitiesView: React.FC = () => {
             <div className="pt-2 flex flex-wrap items-center gap-3">
               <button
                 onClick={() => {
+                  if (!canUseServices) {
+                    requireServicePlan('Publicar Oportunidade');
+                    return;
+                  }
                   setRegisterTab('solicitante');
                   setIsRegisterModalOpen(true);
                 }}
-                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-amber-500 transition-all flex items-center gap-2 active:scale-95"
+                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-amber-500 transition-all flex items-center gap-2 active:scale-95 cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
+                {canUseServices ? <Plus className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                 Publicar Oportunidade (Solicitante)
               </button>
 
               <button
                 onClick={() => {
+                  if (!canUseServices) {
+                    requireServicePlan('Cadastrar Perfil de Prestador');
+                    return;
+                  }
                   setRegisterTab('prestador');
                   setIsRegisterModalOpen(true);
                 }}
-                className="px-5 py-3 rounded-2xl bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 active:scale-95 shadow-md"
+                className="px-5 py-3 rounded-2xl bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 active:scale-95 shadow-md cursor-pointer"
               >
-                <UserCheck className="w-4 h-4 text-amber-400" />
+                {canUseServices ? <UserCheck className="w-4 h-4 text-amber-400" /> : <Lock className="w-4 h-4 text-amber-400" />}
                 Cadastrar Perfil de Prestador
               </button>
             </div>
@@ -560,8 +618,8 @@ export const OpportunitiesView: React.FC = () => {
           <div className="inline-flex p-1.5 rounded-2xl bg-slate-900 border border-slate-800">
             <button
               onClick={() => setActiveMode('opportunities')}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
-                activeMode === 'opportunities'
+              className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+                activeMode === 'opportunities' || !canUseServices
                   ? 'bg-amber-500 text-slate-950 shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
@@ -570,15 +628,22 @@ export const OpportunitiesView: React.FC = () => {
               Oportunidades de Obras ({opportunities.length})
             </button>
             <button
-              onClick={() => setActiveMode('providers')}
-              className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 ${
-                activeMode === 'providers'
+              onClick={() => {
+                if (!canUseServices) {
+                  requireServicePlan('Ranking e Contratação de Prestadores');
+                  return;
+                }
+                setActiveMode('providers');
+              }}
+              className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+                activeMode === 'providers' && canUseServices
                   ? 'bg-amber-500 text-slate-950 shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Trophy className="w-4 h-4 text-amber-400" />
+              {canUseServices ? <Trophy className="w-4 h-4 text-amber-400" /> : <Lock className="w-4 h-4 text-amber-400" />}
               Ranking de Prestadores ({providers.length})
+              {!canUseServices && <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">Plano Pago</span>}
             </button>
           </div>
 
@@ -590,7 +655,7 @@ export const OpportunitiesView: React.FC = () => {
       </div>
 
       {/* ===================== MODE 1: OPORTUNIDADES ===================== */}
-      {activeMode === 'opportunities' && (
+      {(activeMode === 'opportunities' || !canUseServices) && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Sidebar Filters */}
           <div className="lg:col-span-3 space-y-6">
@@ -687,13 +752,17 @@ export const OpportunitiesView: React.FC = () => {
               </p>
               <button 
                 onClick={() => {
+                  if (!canUseServices) {
+                    requireServicePlan('Cadastrar Minha Demanda');
+                    return;
+                  }
                   setRegisterTab('solicitante');
                   setIsRegisterModalOpen(true);
                 }}
-                className="w-full py-2.5 rounded-xl bg-slate-950 text-white text-[11px] font-black uppercase transition-transform active:scale-95 shadow-md flex items-center justify-center gap-2"
+                className="w-full py-2.5 rounded-xl bg-slate-950 text-white text-[11px] font-black uppercase transition-transform active:scale-95 shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
-                <Plus className="w-3.5 h-3.5 text-amber-400" />
-                Cadastrar Minha Demanda
+                {canUseServices ? <Plus className="w-3.5 h-3.5 text-amber-400" /> : <Lock className="w-3.5 h-3.5 text-amber-400" />}
+                {canUseServices ? 'Cadastrar Minha Demanda' : 'Liberar Publicação (Plano Pago)'}
               </button>
             </div>
           </div>
@@ -707,12 +776,16 @@ export const OpportunitiesView: React.FC = () => {
               </h2>
               <button
                 onClick={() => {
+                  if (!canUseServices) {
+                    requireServicePlan('Nova Demanda');
+                    return;
+                  }
                   setRegisterTab('solicitante');
                   setIsRegisterModalOpen(true);
                 }}
-                className="text-xs font-black text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1"
+                className="text-xs font-black text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
               >
-                <Plus className="w-3.5 h-3.5" />
+                {canUseServices ? <Plus className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
                 Nova Demanda
               </button>
             </div>
@@ -802,22 +875,33 @@ export const OpportunitiesView: React.FC = () => {
                         </div>
 
                         <div className="space-y-2">
-                          <a
-                            href={formatWhatsappLink(
-                              opp.contactPhone,
-                              `Olá ${opp.contactName}! Vi sua oportunidade de obra "${opp.title}" no aplicativo Mãos em Obra e gostaria de enviar minha proposta e orçamento.`
-                            )}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                            WhatsApp Direto
-                          </a>
+                          {canUseServices ? (
+                            <a
+                              href={formatWhatsappLink(
+                                opp.contactPhone,
+                                `Olá ${opp.contactName}! Vi sua oportunidade de obra "${opp.title}" no aplicativo Mãos em Obra e gostaria de enviar minha proposta e orçamento.`
+                              )}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              WhatsApp Direto
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => requireServicePlan('Enviar Proposta via WhatsApp')}
+                              className="w-full py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-700 dark:text-amber-300 text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                              Liberar WhatsApp (Pago)
+                            </button>
+                          )}
 
                           <button 
                             onClick={() => setSelectedOpp(opp)}
-                            className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 text-slate-900 dark:text-white text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all"
+                            className="w-full py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 text-slate-900 dark:text-white text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                           >
                             Ver Detalhes
                             <ArrowUpRight className="w-3.5 h-3.5" />
@@ -857,7 +941,7 @@ export const OpportunitiesView: React.FC = () => {
       )}
 
       {/* ===================== MODE 2: BANCO DE PRESTADORES COM RANKING & AVALIAÇÕES ===================== */}
-      {activeMode === 'providers' && (
+      {activeMode === 'providers' && canUseServices && (
         <div className="space-y-6">
           {/* 🏆 PODIUM DE REPUTAÇÃO (TOP RANKING) */}
           <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 text-white shadow-xl">
@@ -2063,22 +2147,40 @@ export const OpportunitiesView: React.FC = () => {
                   </div>
                   <div>
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Contato Direto</div>
-                    <div className="text-xs font-black text-slate-900 dark:text-white">{selectedOpp.contactName} ({selectedOpp.contactPhone})</div>
+                    <div className="text-xs font-black text-slate-900 dark:text-white">
+                      {canUseServices
+                        ? `${selectedOpp.contactName} (${selectedOpp.contactPhone})`
+                        : `${selectedOpp.contactName} (Contato liberado nos planos pagos)`}
+                    </div>
                   </div>
                 </div>
 
-                <a
-                  href={formatWhatsappLink(
-                    selectedOpp.contactPhone,
-                    `Olá ${selectedOpp.contactName}! Vi a vaga "${selectedOpp.title}" no aplicativo Mãos em Obra e gostaria de candidatar-me e apresentar meu orçamento.`
-                  )}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 active:scale-95"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  Enviar Proposta no WhatsApp
-                </a>
+                {canUseServices ? (
+                  <a
+                    href={formatWhatsappLink(
+                      selectedOpp.contactPhone,
+                      `Olá ${selectedOpp.contactName}! Vi a vaga "${selectedOpp.title}" no aplicativo Mãos em Obra e gostaria de candidatar-me e apresentar meu orçamento.`
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    Enviar Proposta no WhatsApp
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedOpp(null);
+                      requireServicePlan('Enviar Proposta no WhatsApp');
+                    }}
+                    className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Lock className="w-4 h-4" />
+                    Assinar Plano Pago para Enviar Proposta
+                  </button>
+                )}
               </div>
             </div>
           </div>

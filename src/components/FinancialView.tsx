@@ -105,9 +105,11 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
     description?: string;
     payerName?: string;
     isNewIncome?: boolean;
+    requirePlanSelection?: boolean;
   }>({
     title: 'Cobrança Mercado Pago',
     amount: 0,
+    requirePlanSelection: true,
   });
 
   // Form states
@@ -356,11 +358,12 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
 
   const handleOpenMercadoPagoQuickCharge = () => {
     setMpPaymentTarget({
-      title: `Plano Mensal Pro / Aporte - ${project.title}`,
-      amount: 149.90,
-      description: `Assinatura Plano Mensal Pro (R$ 149,90) ou aporte emitido para ${project.title}`,
+      title: `Planos ou Aporte - ${project.title}`,
+      amount: 0,
+      description: `Escolha livremente o plano ou valor de aporte para ${project.title}`,
       payerName: project.clientName || 'Cliente da Obra',
       isNewIncome: true,
+      requirePlanSelection: true,
     });
     setIsMpModalOpen(true);
   };
@@ -1368,6 +1371,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
         onClose={() => setIsMpModalOpen(false)}
         title={mpPaymentTarget.title}
         amount={mpPaymentTarget.amount}
+        requirePlanSelection={mpPaymentTarget.requirePlanSelection}
         description={mpPaymentTarget.description}
         payerName={mpPaymentTarget.payerName}
         payerEmail={project.clientEmail || 'cliente@obra.com.br'}

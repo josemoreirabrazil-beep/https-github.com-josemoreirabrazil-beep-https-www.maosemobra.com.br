@@ -49,7 +49,9 @@ import {
   HardHat,
   Store,
   Briefcase,
-  Send
+  Send,
+  FileCheck2,
+  Plug
 } from 'lucide-react';
 import type { 
   Project, 
@@ -83,12 +85,16 @@ import {
   deleteSubscriberPayment,
   fetchSubscriptionPlans,
   saveSubscriptionPlan,
-  deleteSubscriptionPlan
+  deleteSubscriptionPlan,
+  adjustPendingSubscribersBilling
 } from '../services/subscriberBilling';
 import { INITIAL_CORPORATE_CONTACTS } from '../data/corporateContacts';
 import { loadCorporateContacts, updateCorporateContactStatus } from '../services/storage';
 import { RecebimentosWebhookManager } from './RecebimentosWebhookManager';
 import { InvitationMetricsManager } from './InvitationMetricsManager';
+import { SubscriberBillingDispatcher } from './SubscriberBillingDispatcher';
+import { FiscalNfseManager } from './FiscalNfseManager';
+import { FiscalEmitterConfigModule } from './FiscalEmitterConfigModule';
 import confetti from 'canvas-confetti';
 
 interface AdminMasterViewProps {
@@ -125,7 +131,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'cashflow' | 'shield' | 'database' | 'logs' | 'users' | 'prospec' | 'invitations'>('cashflow');
+  const [activeSubTab, setActiveSubTab] = useState<'cashflow' | 'fiscal' | 'fiscal_config' | 'shield' | 'database' | 'logs' | 'users' | 'prospec' | 'invitations'>('cashflow');
 
   // Subscribers Cashflow & Billing State
   const [subscriberPayments, setSubscriberPayments] = useState<SubscriberPayment[]>([]);
@@ -150,7 +156,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [formSubscriberPhone, setFormSubscriberPhone] = useState('');
   const [formSubscriberRole, setFormSubscriberRole] = useState<SubscriberRole>('Prestador de Serviço');
   const [formPlanType, setFormPlanType] = useState<SubscriberPlan>('Mensal Pro');
-  const [formAmount, setFormAmount] = useState('149.90');
+  const [formAmount, setFormAmount] = useState('29.90');
   const [formMethod, setFormMethod] = useState<SubscriberPaymentMethod>('PIX');
   const [formStatus, setFormStatus] = useState<SubscriberPaymentStatus>('Aprovado');
   const [formPaymentDate, setFormPaymentDate] = useState(new Date().toISOString().split('T')[0]);
@@ -165,8 +171,8 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [editingPlan, setEditingPlan] = useState<SubscriptionPlanPricing | null>(null);
   const [formPlanName, setFormPlanName] = useState('');
   const [formPlanCode, setFormPlanCode] = useState('');
-  const [formPlanPrice, setFormPlanPrice] = useState('149.90');
-  const [formPlanCycle, setFormPlanCycle] = useState<'Mensal' | 'Anual' | 'Por Uso' | 'Gratuito'>('Mensal');
+  const [formPlanPrice, setFormPlanPrice] = useState('29.90');
+  const [formPlanCycle, setFormPlanCycle] = useState<'Mensal' | 'Anual' | 'Gratuito'>('Mensal');
   const [formPlanAudience, setFormPlanAudience] = useState('');
   const [formPlanFeatures, setFormPlanFeatures] = useState('');
 
@@ -380,7 +386,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       setEditingPlan(null);
       setFormPlanName('');
       setFormPlanCode('');
-      setFormPlanPrice('149.90');
+      setFormPlanPrice('29.90');
       setFormPlanCycle('Mensal');
       setFormPlanAudience('');
       setFormPlanFeatures('Obras ilimitadas, RDOs digitais, Suporte prioritário');
@@ -466,7 +472,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       setFormSubscriberPhone('');
       setFormSubscriberRole('Prestador de Serviço');
       setFormPlanType('Mensal Pro');
-      setFormAmount('149.90');
+      setFormAmount('29.90');
       setFormMethod('PIX');
       setFormStatus('Aprovado');
       setFormPaymentDate(new Date().toISOString().split('T')[0]);
@@ -856,6 +862,35 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           </span>
         </button>
 
+        {/* TAB 2: NOTAS FISCAIS NFS-e & EMISSÃO AUTOMÁTICA */}
+        <button
+          onClick={() => setActiveSubTab('fiscal')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'fiscal'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <FileCheck2 className="w-4 h-4" />
+          <span>Notas Fiscais (NFS-e) & Transmissões</span>
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-600 text-white ml-1">
+            CNPJ 68.603.032/0001-15
+          </span>
+        </button>
+
+        {/* TAB 3: CONFIGURADOR DO EMISSOR, CERTIFICADO A1 & ENDPOINTS WEB */}
+        <button
+          onClick={() => setActiveSubTab('fiscal_config')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'fiscal_config'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <Plug className="w-4 h-4" />
+          <span>Emissor NFS-e & Certificado A1 (Config & Teste)</span>
+        </button>
+
         <button
           onClick={() => setActiveSubTab('shield')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
@@ -1168,6 +1203,17 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
             )}
           </div>
 
+          {/* LIVE MERCADO PAGO SUBSCRIBER BILLING DISPATCHER & RECONCILIATION */}
+          <SubscriberBillingDispatcher
+            adminToken={adminUser.token}
+            subscriberPayments={subscriberPayments}
+            subscriptionPlans={subscriptionPlans}
+            projects={projects}
+            team={team}
+            serviceRequests={serviceRequests}
+            onBillingUpdated={() => loadAllAdminData(false)}
+          />
+
           {/* MERCADO PAGO WEBHOOK MANAGER: CLIENT & SERVICE PROVIDER RECEIPTS */}
           <RecebimentosWebhookManager onRefreshParent={() => loadAllAdminData(false)} />
 
@@ -1215,14 +1261,16 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                         <div className="mt-1">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                             plan.billingCycle === 'Mensal'
-                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                              ? 'bg-[#009ee3]/10 text-[#009ee3] border border-[#009ee3]/25'
                               : plan.billingCycle === 'Anual'
-                              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
-                              : plan.billingCycle === 'Por Uso'
-                              ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
+                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30'
                               : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                           }`}>
-                            {plan.billingCycle}
+                            {plan.billingCycle === 'Mensal'
+                              ? 'Mensal Recorrente'
+                              : plan.billingCycle === 'Anual'
+                              ? 'Anual Recorrente • Construtoras'
+                              : 'Cadastro Gratuito (Só Oportunidades)'}
                           </span>
                         </div>
                       </td>
@@ -1235,7 +1283,9 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
                       <td className="py-3.5 px-3">
                         <div className="text-sm font-black text-emerald-600 dark:text-emerald-400">
-                          {plan.price === 0 ? 'Gratuito (R$ 0,00)' : `R$ ${plan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                          {plan.price === 0
+                            ? 'Gratuito (R$ 0,00)'
+                            : `R$ ${plan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}${plan.billingCycle === 'Anual' ? '/ano' : '/mês'}`}
                         </div>
                         <div className="text-[10px] text-slate-400 mt-0.5">
                           Atualizado: {new Date(plan.updatedAt).toLocaleDateString('pt-BR')}
@@ -1351,13 +1401,30 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 </p>
               </div>
 
-              <button
-                onClick={() => loadAllAdminData(true)}
-                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300 transition cursor-pointer"
-                title="Recarregar Caixa"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                {subscriberPayments.some((s) => s.status === 'Pendente' || s.status === 'Atrasado') && (
+                  <button
+                    onClick={async () => {
+                      await adjustPendingSubscribersBilling({ reemitMercadoPago: true }, adminUser.token);
+                      await loadAllAdminData(false);
+                      confetti({ particleCount: 40, spread: 60 });
+                    }}
+                    className="px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-300 border border-amber-500/30 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                    title="Ajustar valores pendentes conforme os novos planos reduzidos"
+                  >
+                    <BadgeDollarSign className="w-3.5 h-3.5" />
+                    <span>Ajustar Pendentes p/ Planos Reduzidos</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => loadAllAdminData(true)}
+                  className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300 transition cursor-pointer"
+                  title="Recarregar Caixa"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {filteredSubscribers.length === 0 ? (
@@ -1423,6 +1490,8 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                             <div className="mt-1">
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
                                 sub.planType === 'Anual Construtor'
+                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30'
+                                  : sub.planType === 'Mensal Construtor'
                                   ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
                                   : sub.planType === 'Mensal Pro'
                                   ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
@@ -1815,19 +1884,22 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           {/* Global Statistics */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-              <span className="text-xs font-bold text-slate-500 uppercase">Obras Gerenciadas</span>
+              <span className="text-xs font-bold text-slate-500 uppercase">Assinantes Inscritos</span>
               <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                {projects.length} Obras
+                {subscriberPayments.length} Inscritos
+              </div>
+              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-bold">
+                {cashflowSummary.activePaidSubscribers} Pagos Ativos · {cashflowSummary.freeTierSubscribers} Gratuitos Ativos
               </div>
             </div>
 
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-              <span className="text-xs font-bold text-slate-500 uppercase">Inscritos Totais</span>
+              <span className="text-xs font-bold text-slate-500 uppercase">Cadastros Operacionais</span>
               <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
                 {registeredCount} Cadastrados
               </div>
-              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-                Inscrição Grátis Lançamento
+              <div className="text-[10px] text-slate-500 mt-0.5">
+                Equipe, fornecedores &amp; pedidos ({projects.length} obras)
               </div>
             </div>
 
@@ -1843,6 +1915,88 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
                 {team.length} Contatos
               </div>
+            </div>
+          </div>
+
+          {/* Real Enrolled & Active Subscribers Status Table */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-500" />
+                  Status dos Assinantes Reais Inscritos &amp; Ativos ({subscriberPayments.length})
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Situação de vigência, plano contratado e verificação Mercado Pago de cada assinante cadastrado
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('cashflow')}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer self-start sm:self-auto"
+              >
+                Abrir Cobranças &amp; Auditoria MP →
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-[10px] uppercase text-slate-400 font-bold">
+                    <th className="py-2.5 px-3">Assinante</th>
+                    <th className="py-2.5 px-3">Perfil</th>
+                    <th className="py-2.5 px-3">Plano &amp; Valor</th>
+                    <th className="py-2.5 px-3">Status Ativo</th>
+                    <th className="py-2.5 px-3">Validação Mercado Pago</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {subscriberPayments.map((sub) => {
+                    const isFree = sub.planType === 'Gratuito Lançamento' || sub.status === 'Isento / Cortesia';
+                    const isPaidActive = sub.status === 'Aprovado' && Number(sub.amount) > 0;
+                    const isMpPaid = sub.mpVerifiedStatus === 'approved' || sub.billingStatus === 'Pago no MP';
+                    return (
+                      <tr key={sub.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="py-2.5 px-3">
+                          <div className="font-bold text-slate-900 dark:text-white">{sub.subscriberName}</div>
+                          <div className="text-[11px] text-slate-500">
+                            {sub.subscriberPhone} {sub.subscriberEmail ? `· ${sub.subscriberEmail}` : ''}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{sub.subscriberRole}</td>
+                        <td className="py-2.5 px-3">
+                          <div className="font-bold text-slate-900 dark:text-white">{sub.planType}</div>
+                          <div className="text-[11px] font-black text-emerald-600 dark:text-emerald-400">
+                            {Number(sub.amount) === 0 ? 'R$ 0,00 (Gratuito)' : `R$ ${Number(sub.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/mês`}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black ${
+                            isPaidActive
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : isFree
+                              ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                              : sub.status === 'Atrasado'
+                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          }`}>
+                            {isPaidActive ? 'Ativo (Pago)' : isFree ? 'Ativo (Gratuito)' : sub.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-[11px]">
+                          {isMpPaid ? (
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400">Confirmado ao vivo MP</span>
+                          ) : sub.billingStatus ? (
+                            <span className="font-semibold text-amber-600 dark:text-amber-400">{sub.billingStatus}</span>
+                          ) : (
+                            <span className="text-slate-400">{sub.method} · Registro interno</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -2146,6 +2300,31 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       )}
 
       {/* ======================================================== */}
+      {/* 🧾 TAB 8: EMISSÃO AUTOMÁTICA DE NFS-e & TRANSMISSÕES */}
+      {/* ======================================================== */}
+      {activeSubTab === 'fiscal' && (
+        <div className="space-y-6">
+          <FiscalNfseManager
+            adminToken={adminUser.token}
+            onDataChanged={() => loadAllAdminData(false)}
+          />
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* ⚙️ TAB 9: MÓDULO DE CONFIGURAÇÃO DO EMISSOR, CERTIFICADO A1 & ENDPOINTS WEB */}
+      {/* ======================================================== */}
+      {activeSubTab === 'fiscal_config' && (
+        <div className="space-y-6">
+          <FiscalEmitterConfigModule
+            adminToken={adminUser.token}
+            onDataChanged={() => loadAllAdminData(false)}
+            onOpenInvoicesTab={() => setActiveSubTab('fiscal')}
+          />
+        </div>
+      )}
+
+      {/* ======================================================== */}
       {/* 📝 MODAL: CADASTRO / EDIÇÃO DE PAGAMENTO DE ASSINANTE */}
       {/* ======================================================== */}
       {isPaymentModalOpen && (
@@ -2248,19 +2427,21 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                     onChange={(e) => {
                       const val = e.target.value as SubscriberPlan;
                       setFormPlanType(val);
-                      if (val === 'Mensal Pro') setFormAmount('149.90');
-                      if (val === 'Anual Construtor') setFormAmount('1490.00');
+                      if (val === 'Mensal Pro') setFormAmount('29.90');
+                      if (val === 'Mensal Construtor') setFormAmount('49.90');
+                      if (val === 'Anual Construtor') setFormAmount('499.00');
                       if (val === 'Gratuito Lançamento') {
                         setFormAmount('0.00');
                         setFormStatus('Isento / Cortesia');
                       }
-                      if (val === 'Taxa de Proposta / Uso') setFormAmount('45.00');
+                      if (val === 'Mensal Básico') setFormAmount('25.00');
                     }}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500"
                   >
-                    <option value="Mensal Pro">Mensal Pro (R$ 149,90/mês)</option>
-                    <option value="Anual Construtor">Anual Construtor (R$ 1.490,00/ano)</option>
-                    <option value="Taxa de Proposta / Uso">Taxa de Proposta / Uso (R$ 45,00)</option>
+                    <option value="Mensal Pro">Mensal Pro (R$ 29,90/mês)</option>
+                    <option value="Mensal Construtor">Mensal Construtor (R$ 49,90/mês)</option>
+                    <option value="Anual Construtor">Anual Construtor (R$ 499,00/ano)</option>
+                    <option value="Mensal Básico">Mensal Básico (R$ 25,00/mês)</option>
                     <option value="Gratuito Lançamento">Gratuito Lançamento (R$ 0,00)</option>
                     <option value="Personalizado">Personalizado / Outro</option>
                   </select>
@@ -2423,7 +2604,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="Ex: Mensal Pro, Anual Construtor..."
+                    placeholder="Ex: Mensal Básico, Mensal Pro, Mensal Construtor..."
                     value={formPlanName}
                     onChange={(e) => setFormPlanName(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 font-bold"
@@ -2452,7 +2633,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                     step="0.01"
                     min="0"
                     required
-                    placeholder="149.90"
+                    placeholder="29.90"
                     value={formPlanPrice}
                     onChange={(e) => setFormPlanPrice(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 font-black text-emerald-600 dark:text-emerald-400"
@@ -2468,10 +2649,9 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                     onChange={(e) => setFormPlanCycle(e.target.value as any)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 font-bold"
                   >
-                    <option value="Mensal">Mensal</option>
-                    <option value="Anual">Anual</option>
-                    <option value="Por Uso">Por Uso (Avulso)</option>
-                    <option value="Gratuito">Gratuito</option>
+                    <option value="Mensal">Assinatura Mensal Recorrente (Mercado Pago)</option>
+                    <option value="Anual">Assinatura Anual Recorrente (Construtoras / Empreiteiras / Incorporadoras)</option>
+                    <option value="Gratuito">Cadastro Gratuito (Apenas Visualização de Oportunidades)</option>
                   </select>
                 </div>
 

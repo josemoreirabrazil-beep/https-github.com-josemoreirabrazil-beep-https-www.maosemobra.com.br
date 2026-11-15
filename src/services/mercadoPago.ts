@@ -40,6 +40,43 @@ export async function getMercadoPagoStatus(): Promise<MercadoPagoStatusResponse>
   }
 }
 
+export interface MercadoPagoSubscriptionResponse {
+  subscriptionId: string;
+  planId?: string;
+  initPoint: string;
+  frequency: number;
+  frequencyType: 'months';
+  billingCycle?: 'Mensal' | 'Anual';
+  recurring: boolean;
+  amount: number;
+  mode: 'live' | 'fallback' | 'demo';
+  notice?: string;
+}
+
+export async function createMercadoPagoSubscription(data: {
+  title: string;
+  amount: number;
+  planName?: string;
+  billingCycle?: 'Mensal' | 'Anual' | 'Gratuito';
+  payerName?: string;
+  payerEmail?: string;
+  referenceId?: string;
+  description?: string;
+}): Promise<MercadoPagoSubscriptionResponse> {
+  const response = await fetch('/api/mercadopago/create-subscription', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao gerar assinatura recorrente no Mercado Pago');
+  }
+
+  return response.json();
+}
+
 export async function createMercadoPagoPreference(data: {
   title: string;
   amount: number;

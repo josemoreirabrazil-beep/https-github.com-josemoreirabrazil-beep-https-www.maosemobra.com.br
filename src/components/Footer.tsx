@@ -19,7 +19,8 @@ import {
   Lock,
   ExternalLink,
   Download,
-  Smartphone
+  Smartphone,
+  FileCheck2
 } from 'lucide-react';
 import type { NavTab } from './Navigation';
 import type { Project, TeamMember, ServiceRequest } from '../types';
@@ -242,6 +243,15 @@ export const Footer: React.FC<FooterProps> = ({
                   className="hover:text-amber-400 transition cursor-pointer flex items-center gap-1.5 text-slate-300"
                 >
                   <span>Diário de Obra (RDO)</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onNavigate('reports')}
+                  className="hover:text-amber-400 transition cursor-pointer flex items-center gap-1.5 text-slate-300"
+                >
+                  <FileCheck2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Laudos, ARTs &amp; Logo Cliente</span>
                 </button>
               </li>
               <li>

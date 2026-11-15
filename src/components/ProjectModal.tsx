@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { X, Building2, Calendar, DollarSign, User, MapPin, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Building2, Calendar, DollarSign, User, MapPin, FileText, Upload, Image as ImageIcon } from 'lucide-react';
 import type { Project, ProjectType, ProjectStatus } from '../types';
+import { readAndResizeLogoFile } from '../services/storage';
 
 interface ProjectModalProps {
   isOpen: boolean;
@@ -24,6 +25,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [estimatedEndDate, setEstimatedEndDate] = useState('');
   const [status, setStatus] = useState<ProjectStatus>('Em Andamento');
   const [notes, setNotes] = useState('');
+  const [clientInstitutionalName, setClientInstitutionalName] = useState('');
+  const [clientDocument, setClientDocument] = useState('');
+  const [clientLogoUrl, setClientLogoUrl] = useState('');
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialData) {
@@ -36,6 +41,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       setEstimatedEndDate(initialData.estimatedEndDate || '');
       setStatus(initialData.status || 'Em Andamento');
       setNotes(initialData.notes || '');
+      setClientInstitutionalName(initialData.clientInstitutionalName || '');
+      setClientDocument(initialData.clientDocument || '');
+      setClientLogoUrl(initialData.clientLogoUrl || '');
     } else {
       setTitle('');
       setClientName('');
@@ -48,10 +56,26 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       setEstimatedEndDate(future.toISOString().split('T')[0]);
       setStatus('Em Andamento');
       setNotes('');
+      setClientInstitutionalName('');
+      setClientDocument('');
+      setClientLogoUrl('');
     }
   }, [initialData, isOpen]);
 
   if (!isOpen) return null;
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const resized = await readAndResizeLogoFile(file);
+      setClientLogoUrl(resized);
+    } catch {
+      // Ignore invalid image files
+    } finally {
+      if (logoFileInputRef.current) logoFileInputRef.current.value = '';
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +85,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       id: initialData?.id || `proj-${Date.now()}`,
       title: title.trim(),
       clientName: clientName.trim(),
+      clientInstitutionalName: clientInstitutionalName.trim() || undefined,
+      clientDocument: clientDocument.trim() || undefined,
+      clientLogoUrl: clientLogoUrl || undefined,
       address: address.trim(),
       type,
       budgetTotal: Number(budgetTotal) || 0,
@@ -239,6 +266,73 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                 onChange={(e) => setNotes(e.target.value)}
                 className="w-full px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition"
               />
+            </div>
+          </div>
+
+          {/* Client Institutional Logo & Document */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <ImageIcon className="w-3.5 h-3.5 text-amber-500" />
+                Logotipo Institucional do Cliente (para Laudos &amp; ARTs)
+              </span>
+              {clientLogoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setClientLogoUrl('')}
+                  className="text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
+                >
+                  Remover Logo
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <div className="w-28 h-14 rounded-xl border border-dashed border-slate-300 dark:border-slate-600 bg-white flex items-center justify-center p-1.5 shrink-0">
+                {clientLogoUrl ? (
+                  <img
+                    src={clientLogoUrl}
+                    alt="Logotipo institucional do cliente"
+                    referrerPolicy="no-referrer"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                ) : (
+                  <span className="text-[10px] text-slate-400">Sem logo</span>
+                )}
+              </div>
+
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+                <input
+                  type="text"
+                  placeholder="Razão Social / Condomínio"
+                  value={clientInstitutionalName}
+                  onChange={(e) => setClientInstitutionalName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                />
+                <input
+                  type="text"
+                  placeholder="CNPJ / CPF"
+                  value={clientDocument}
+                  onChange={(e) => setClientDocument(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white"
+                />
+              </div>
+
+              <input
+                ref={logoFileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                onChange={handleLogoUpload}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => logoFileInputRef.current?.click()}
+                className="px-3 py-2 rounded-xl bg-slate-900 dark:bg-amber-500 text-white dark:text-slate-950 text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>{clientLogoUrl ? 'Trocar' : 'Enviar Logo'}</span>
+              </button>
             </div>
           </div>
 
