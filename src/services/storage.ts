@@ -741,7 +741,7 @@ export function saveServiceProviders(providers: ServiceProviderProfile[]): void 
 export function loadCorporateContacts(): CorporateContact[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.CORPORATE_CONTACTS);
-    if (!raw) {
+    if (!raw || JSON.parse(raw).length < 810) {
       localStorage.setItem(STORAGE_KEYS.CORPORATE_CONTACTS, JSON.stringify(INITIAL_CORPORATE_CONTACTS));
       return INITIAL_CORPORATE_CONTACTS;
     }

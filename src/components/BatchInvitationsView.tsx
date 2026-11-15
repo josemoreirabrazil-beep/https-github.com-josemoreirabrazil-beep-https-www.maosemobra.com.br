@@ -235,11 +235,16 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
   const handleStartQueue = async () => {
     const targetIds =
       selectedIds.size > 0
-        ? Array.from(selectedIds)
-        : filteredContacts.filter((c) => c.status === 'Pendente').map((c) => c.id);
+        ? Array.from(selectedIds).filter(id => {
+            const c = contacts.find(item => item.id === id);
+            return c && c.status === 'Pendente';
+          })
+        : filteredContacts
+            .filter((c) => c.status === 'Pendente')
+            .map((c) => c.id);
 
     if (targetIds.length === 0) {
-      alert('Todos os contatos filtrados já foram disparados ou nenhum foi selecionado!');
+      alert('Nenhum contato pendente encontrado. Os convites para os contatos selecionados já foram enviados recentemente ou já possuem status de atendimento!');
       return;
     }
 
