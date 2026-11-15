@@ -22,10 +22,19 @@
     visibility: hidden;
   }
   #printable-technical-doc,
-  #printable-technical-doc * {
+  #printable-technical-doc *,
+  #printable-work-permit,
+  #printable-work-permit *,
+  #printable-dds,
+  #printable-dds *,
+  #printable-rdo,
+  #printable-rdo * {
     visibility: visible;
   }
-  #printable-technical-doc {
+  #printable-technical-doc,
+  #printable-work-permit,
+  #printable-dds,
+  #printable-rdo {
     position: absolute;
     left: 0;
     top: 0;

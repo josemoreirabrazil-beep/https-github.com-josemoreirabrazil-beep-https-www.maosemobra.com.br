@@ -341,7 +341,7 @@ export const SafetyWorkPermitAndDdsView: React.FC<SafetyWorkPermitAndDdsViewProp
             {/* Right Column: PT Details / Preview */}
             <div className="lg:col-span-2">
               {selectedPt ? (
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+                <div id="printable-work-permit" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -535,7 +535,7 @@ export const SafetyWorkPermitAndDdsView: React.FC<SafetyWorkPermitAndDdsViewProp
             {/* Right Column: DDS Details / Preview */}
             <div className="lg:col-span-2">
               {selectedDds ? (
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+                <div id="printable-dds" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
                     <div>
                       <div className="flex items-center gap-2 mb-1">

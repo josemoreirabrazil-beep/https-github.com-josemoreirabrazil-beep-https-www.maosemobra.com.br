@@ -54,6 +54,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [editingRdoId, setEditingRdoId] = useState<string | null>(null);
+  const [printableRdoId, setPrintableRdoId] = useState<string | null>(null);
 
   // Form states
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -662,6 +663,7 @@ ${rdoToSave.aiSummary}
           rdos.map((rdo, index) => (
             <div 
               key={rdo.id} 
+              id={printableRdoId === rdo.id ? "printable-rdo" : undefined}
               className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm hover:border-amber-400/80 transition space-y-4"
             >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -684,6 +686,21 @@ ${rdoToSave.aiSummary}
                 </div>
 
                 <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <button
+                    onClick={() => {
+                      setPrintableRdoId(rdo.id);
+                      setTimeout(() => {
+                        window.print();
+                        setPrintableRdoId(null);
+                      }, 100);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                    title="Imprimir / PDF RDO"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-amber-500" />
+                    Imprimir / PDF
+                  </button>
+
                   <button
                     onClick={() => handleSaveToGoogleDrive(rdo)}
                     disabled={isSavingToDrive}

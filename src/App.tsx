@@ -21,6 +21,7 @@ import { ProjectModal } from './components/ProjectModal';
 import { InstallAppModal } from './components/InstallAppModal';
 import { WithdrawalModal } from './components/WithdrawalModal';
 import { MercadoPagoModal } from './components/MercadoPagoModal';
+import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { Download, CheckCircle2, X, Megaphone, ExternalLink, Lock, Briefcase, Sparkles, ShieldCheck, LogIn } from 'lucide-react';
 import { 
   parseMercadoPagoRedirectParams, 
@@ -105,6 +106,19 @@ export default function App() {
   const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [isWithdrawalModalOpen, setIsWithdrawalModalOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+
+  // Global Ctrl+K or Cmd+K shortcut for Global Search
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchModalOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // 🔔 Webhook / Retorno Automático do Mercado Pago State
   const [webhookNotification, setWebhookNotification] = useState<WebhookProcessResult | null>(null);
@@ -598,6 +612,7 @@ export default function App() {
         onNavigateToReports={() => handleTabChange('reports')}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
         onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
+        onOpenSearchModal={() => setIsSearchModalOpen(true)}
       />
 
       {/* Navigation Sub-header */}
@@ -1142,6 +1157,22 @@ export default function App() {
             mpVerifiedStatus: chosen.price > 0 ? 'approved' : undefined,
           });
         }}
+      />
+
+      {/* 🔍 Global Search Modal */}
+      <GlobalSearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        projects={projects}
+        currentProject={currentProject}
+        onSelectProject={(id) => setCurrentProjectId(id)}
+        rdos={rdos}
+        expenses={expenses}
+        phases={phases}
+        team={team}
+        serviceRequests={serviceRequests}
+        techDocs={techDocs}
+        onNavigate={handleTabChange}
       />
 
     </div>

@@ -18,7 +18,8 @@ import {
   Download,
   Wallet,
   ArrowUpRight,
-  FileCheck2
+  FileCheck2,
+  Search
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';
@@ -49,6 +50,7 @@ interface HeaderProps {
   onNavigateToReports?: () => void;
   onOpenInstallModal?: () => void;
   onOpenWithdrawalModal?: () => void;
+  onOpenSearchModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -73,6 +75,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToReports,
   onOpenInstallModal,
   onOpenWithdrawalModal,
+  onOpenSearchModal,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -249,6 +252,19 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Action Tools, Multilingual Menu & Google Drive Sync */}
           <div className="flex flex-wrap xl:flex-nowrap items-center justify-end gap-1.5 sm:gap-2 w-full xl:w-auto">
+
+            {/* 🔍 Global Search Button */}
+            {onOpenSearchModal && (
+              <button
+                onClick={onOpenSearchModal}
+                title="Pesquisa Global no Sistema (Ctrl+K)"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 shadow-xs transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
+              >
+                <Search className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span className="font-extrabold hidden sm:inline">Pesquisar</span>
+                <span className="hidden md:inline-block px-1.5 py-0.5 rounded text-[9px] bg-slate-100 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-mono">Ctrl+K</span>
+              </button>
+            )}
 
             {/* 🌐 BOTÃO MENU MULTILÍNGUES SEMPRE VISÍVEL */}
             <LanguageSelector variant="header" showLabel={true} />
