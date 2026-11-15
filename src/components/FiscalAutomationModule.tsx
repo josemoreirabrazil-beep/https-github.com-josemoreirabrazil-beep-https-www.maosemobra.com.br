@@ -559,15 +559,15 @@ export const FiscalAutomationModule: React.FC<FiscalAutomationModuleProps> = ({
             </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300 text-xs font-bold">
               <Globe className="w-3.5 h-3.5" />
-              Serviços Web (CNAEs 62xx/63xx)
+              Endpoint: {apiProvider === 'prefeitura_abrasf_soap' ? 'prefeitura_abrasf_soap (SOAP mTLS)' : apiProvider}
             </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
               <Lock className="w-3.5 h-3.5" />
-              Cofre A1 AES-256-GCM
+              Cofre FISCAL_VAULT_SECRET ({config?.vaultCipherAlgorithm || 'AES-256-GCM'} • Key {config?.vaultKeyFingerprint || 'Ativa'})
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            <strong>FiscalAutomationModule</strong> — Upload do Certificado Digital A1, definição do CNPJ da empresa, endpoints da API emissora de NFS-e e validação das credenciais ao vivo.
+            <strong>FiscalAutomationModule</strong> — Persistência segura do Certificado Digital A1 com <code className="font-mono">FISCAL_VAULT_SECRET</code> e integração SOAP mTLS (<code className="font-mono">prefeitura_abrasf_soap</code>) para as atividades de serviços web.
           </p>
         </div>
 
@@ -749,8 +749,14 @@ export const FiscalAutomationModule: React.FC<FiscalAutomationModuleProps> = ({
                 {formatDateBR(config?.certificate?.validFrom)} — {formatDateBR(config?.certificate?.validTo)}
               </span>
             </div>
+            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-800">
+              <span className="text-slate-500 dark:text-slate-400">Cofre FISCAL_VAULT_SECRET</span>
+              <span className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+                {config?.vaultCipherAlgorithm || 'AES-256-GCM'} • Key {config?.vaultKeyFingerprint || 'Ativa'} {config?.vaultFilePersisted ? '(Persistido ✓)' : ''}
+              </span>
+            </div>
             {config?.certificate?.fileName && (
-              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200 dark:border-slate-800">
                 <span className="text-slate-500 dark:text-slate-400">Arquivo</span>
                 <span className="font-mono text-[11px] text-emerald-600 dark:text-emerald-400 font-bold truncate max-w-[220px]">
                   {config.certificate.fileName}

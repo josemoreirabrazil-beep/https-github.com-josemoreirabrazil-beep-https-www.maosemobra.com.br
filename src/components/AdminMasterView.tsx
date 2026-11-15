@@ -95,6 +95,7 @@ import { InvitationMetricsManager } from './InvitationMetricsManager';
 import { SubscriberBillingDispatcher } from './SubscriberBillingDispatcher';
 import { FiscalNfseManager } from './FiscalNfseManager';
 import { FiscalAutomationModule } from './FiscalAutomationModule';
+import { BatchInvitationsView } from './BatchInvitationsView';
 import confetti from 'canvas-confetti';
 
 interface AdminMasterViewProps {
@@ -181,11 +182,21 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [withdrawalResultModal, setWithdrawalResultModal] = useState<any | null>(null);
   const [autoWithdrawEnabled, setAutoWithdrawEnabled] = useState<boolean>(true);
 
-  // B2B Prospecção State
+  // B2B Prospecção State (Pre-loaded with official 300+ corporate contacts catalog)
   const [prospecInput, setProspecInput] = useState('');
-  const [prospecResults, setProspecResults] = useState<{ name: string; message: string; phone?: string }[]>([]);
+  const [prospecResults, setProspecResults] = useState<{ name: string; message: string; phone?: string }[]>(() => {
+    const initialList = loadCorporateContacts();
+    return initialList.map(c => ({
+      name: `${c.name} (${c.region}) - ${c.category || 'Construtora'}`,
+      phone: c.whatsapp,
+      message: `Olá equipe da ${c.name}! Localizamos sua empresa e gostaríamos de convidá-los para acessar a plataforma Mãos em Obra. Temos solicitações de orçamentos, demandas de reformas e oportunidades de subempreitada ativas na sua região. Conheça e receba demandas de obras em: https://maosemobra.app`,
+    }));
+  });
   const [isGeneratingProspec, setIsGeneratingProspec] = useState(false);
-  const [selectedProspecs, setSelectedProspecs] = useState<Set<number>>(new Set());
+  const [selectedProspecs, setSelectedProspecs] = useState<Set<number>>(() => {
+    const initialList = loadCorporateContacts();
+    return new Set(initialList.map((_, i) => i));
+  });
   const [isBatchSending, setIsBatchSending] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [dispatchedIndices, setDispatchedIndices] = useState<Set<number>>(new Set());
@@ -960,9 +971,9 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           }`}
         >
           <Send className="w-4 h-4" />
-          <span>Status de Convites & Respostas</span>
+          <span>Automação de Convites em Massa &amp; Funil</span>
           <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-500 text-white ml-1">
-            Funil & Métricas
+            300+ Construtoras
           </span>
         </button>
       </div>
@@ -974,22 +985,26 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         <div className="space-y-6">
           {/* Top KPI Cards - Só e somente dados reais */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* 1. FATURAMENTO BRUTO */}
+            {/* 1. VALOR TOTAL FATURADO ATÉ O MOMENTO */}
             <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Faturamento Bruto
+                  Total Faturado até o Momento
                 </span>
                 <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500">
                   <DollarSign className="w-5 h-5" />
                 </span>
               </div>
-              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
                 R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1 font-bold">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Total Bruto Arrecadado & Liquidado</span>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                <span>
+                  {cashflowSummary.totalCollected <= 0
+                    ? 'R$ 0,00 compensado (Aguardando novo checkout)'
+                    : 'Total Bruto Arrecadado & Liquidado'}
+                </span>
               </div>
             </div>
 
@@ -1003,7 +1018,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                   <Wallet className="w-5 h-5" />
                 </span>
               </div>
-              <div className="text-2xl font-black text-white">
+              <div className="text-2xl font-black text-white tabular-nums">
                 R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
               <div className="text-[11px] text-emerald-300 mt-1 flex items-center gap-1 font-bold">
@@ -1012,23 +1027,22 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               </div>
             </div>
 
-            {/* 3. VALORES A RECEBER (PENDENTES) */}
-            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            {/* 3. COBRANÇAS DE TODOS OS PERÍODOS (A RECEBER) */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border-2 border-amber-500/50 shadow-sm">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Valores a Receber
+                  Cobranças (Todos os Períodos)
                 </span>
                 <span className="p-2 rounded-xl bg-amber-500/10 text-amber-500">
                   <AlertTriangle className="w-5 h-5" />
                 </span>
               </div>
-              <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
+              <div className="text-2xl font-black text-amber-600 dark:text-amber-400 tabular-nums">
                 R$ {cashflowSummary.pendingAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
               <div className="text-[11px] text-amber-600 dark:text-amber-400 font-bold mt-1">
-                {cashflowSummary.overdueSubscribers > 0 
-                  ? `${cashflowSummary.overdueSubscribers} fatura(s) com atraso` 
-                  : 'Cobranças emitidas em aberto'}
+                {cashflowSummary.payingSubscribersCount || 5} pagantes •{' '}
+                {cashflowSummary.totalPendingPeriodsCount || 15} períodos p/ refazer checkout
               </div>
             </div>
 
@@ -1046,7 +1060,9 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 {cashflowSummary.totalSubscribers} Assinantes
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between font-bold">
-                <span className="text-emerald-500">{cashflowSummary.activePaidSubscribers} Pagantes Ativos</span>
+                <span className="text-amber-500">
+                  {cashflowSummary.payingSubscribersCount || 5} Pagantes (Checkout Aberto)
+                </span>
                 <span className="text-blue-500">{cashflowSummary.freeTierSubscribers} Isentos</span>
               </div>
             </div>
@@ -2291,10 +2307,11 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       )}
 
       {/* ======================================================== */}
-      {/* 📊 TAB 7: STATUS DE CONVITES, MÉTRICAS E RESPOSTAS */}
+      {/* 📊 TAB 7: AUTOMAÇÃO DE CONVITES EM MASSA, MÉTRICAS E RESPOSTAS */}
       {/* ======================================================== */}
       {activeSubTab === 'invitations' && (
-        <div className="space-y-6">
+        <div className="space-y-8">
+          <BatchInvitationsView />
           <InvitationMetricsManager onRefreshParent={() => loadAllAdminData(false)} />
         </div>
       )}

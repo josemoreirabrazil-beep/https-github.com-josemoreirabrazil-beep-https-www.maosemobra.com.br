@@ -256,43 +256,6 @@ export const Header: React.FC<HeaderProps> = ({
             {/* 🔔 FIREBASE CLOUD MESSAGING PUSH NOTIFICATIONS */}
             <PushNotificationCenter />
 
-            {/* 📄 ATALHO DIRETO ART & LAUDOS NO CABEÇALHO */}
-            {onNavigateToReports && (
-              <button
-                type="button"
-                data-testid="header-art-laudos-btn"
-                onClick={onNavigateToReports}
-                title={
-                  isAdminAuthenticated
-                    ? 'ART & Laudos (Admin Master — Acesso Total)'
-                    : hasProAccess
-                    ? 'ART & Laudos (Plano Pro Ativo)'
-                    : hasServiceAccess
-                    ? 'ART & Laudos (Assinante Ativo)'
-                    : isUserAuthenticated
-                    ? 'ART & Laudos (Requer Plano Pago)'
-                    : 'ART & Laudos (Entre ou Assine para Liberar)'
-                }
-                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl border shadow-xs transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95 ${
-                  hasServiceAccess
-                    ? 'bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-amber-400 border-amber-500/50'
-                    : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
-                }`}
-              >
-                <FileCheck2 className={`w-3.5 h-3.5 shrink-0 ${hasServiceAccess ? 'text-amber-400' : 'text-amber-500'}`} />
-                <span>ART &amp; Laudos</span>
-                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
-                  isAdminAuthenticated || hasProAccess
-                    ? 'bg-emerald-500/20 text-emerald-300'
-                    : hasServiceAccess
-                    ? 'bg-amber-500/20 text-amber-300'
-                    : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                }`}>
-                  {isAdminAuthenticated ? 'Admin' : hasProAccess ? 'Pro' : hasServiceAccess ? 'Ativo' : 'Plano'}
-                </span>
-              </button>
-            )}
-
             {/* 🔥 BOTÃO OFICIAL DE SAQUE R$ 1.834,80 P/ MERCADO PAGO COM ANIMAÇÃO DE PULSAÇÃO SUAVE 🔥 */}
             <button
               onClick={onOpenWithdrawalModal}

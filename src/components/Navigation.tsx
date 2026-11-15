@@ -18,14 +18,16 @@ import {
   Lock,
   UserCheck,
   Sparkles,
-  LogIn
+  LogIn,
+  Send,
+  BellRing
 } from 'lucide-react';
 import { LanguageSelector } from './LanguageSelector';
 
-export type NavTab = 'dashboard' | 'opportunities' | 'invitations' | 'requests' | 'rdo' | 'reports' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'admin';
+export type NavTab = 'dashboard' | 'opportunities' | 'invitations' | 'requests' | 'rdo' | 'reports' | 'financial' | 'timeline' | 'calculator' | 'drive' | 'team' | 'notifications' | 'admin';
 export type UserAccessRole = 'admin' | 'subscriber_pro' | 'subscriber_paid' | 'free' | 'visitor';
 
-const SERVICE_TABS: NavTab[] = ['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team', 'invitations'];
+const SERVICE_TABS: NavTab[] = ['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team'];
 
 interface NavigationProps {
   activeTab: NavTab;
@@ -90,11 +92,20 @@ export const Navigation: React.FC<NavigationProps> = ({
     },
     {
       id: 'reports' as NavTab,
-      label: 'ART & Laudos',
+      label: 'ART & Laudos Admin',
       description: 'Emissão de ART (CREA), RRT, Laudos e Logo do Cliente',
       icon: FileCheck2,
-      badge: techDocsCount > 0 ? `${techDocsCount}` : undefined,
-      badgeColor: 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black',
+      badge: isAdminAuthenticated ? 'Admin' : hasProAccess ? 'Pro' : techDocsCount > 0 ? `${techDocsCount}` : 'Admin',
+      badgeColor: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-black',
+    },
+    {
+      id: 'invitations' as NavTab,
+      label: 'Automação de Convites em Massa',
+      description: 'Disparo automático em lote (WhatsApp, E-mail e CCO) p/ 300+ construtoras',
+      icon: Send,
+      highlight: true,
+      badge: 'Automação 300+',
+      badgeColor: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-black',
     },
     {
       id: 'opportunities' as NavTab,
@@ -156,6 +167,15 @@ export const Navigation: React.FC<NavigationProps> = ({
       label: 'Equipe & Lojas',
       description: 'Mão de obra, fornecedores e técnicos',
       icon: Users,
+    },
+    {
+      id: 'notifications' as NavTab,
+      label: 'Configurações de Notificações',
+      description: 'Lembretes diários de RDO e alertas de prazos de despesas via Push',
+      icon: BellRing,
+      highlight: true,
+      badge: 'RDO & Despesas',
+      badgeColor: 'bg-amber-500/20 text-amber-700 dark:text-amber-300 font-black',
     },
     {
       id: 'admin' as NavTab,
@@ -370,7 +390,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               )}
             </div>
 
-            {/* Pinned Direct ART & Laudos Button (Always Visible Alongside Menu, State Tied to Auth & Admin/Subscriber) */}
+            {/* Pinned Direct ART & Laudos Admin Button (Only Second Button Kept in Navigation Bar) */}
             <button
               type="button"
               data-testid="nav-art-laudos-btn"
@@ -382,40 +402,46 @@ export const Navigation: React.FC<NavigationProps> = ({
                   ? 'Emissão de ART & Laudos (Plano Pro Ativo — Acesso Total Liberado)'
                   : hasServiceAccess
                   ? 'Emissão de ART (CREA/RRT) liberada — Laudos no Plano Pro'
-                  : 'ART & Laudos — Entre como Assinante/Admin ou escolha um Plano Pago'
+                  : 'ART & Laudos Admin — Entre como Assinante/Admin ou escolha um Plano Pago'
               }
               className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs font-black border transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 active:scale-95 ${
                 activeTab === 'reports'
                   ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-amber-500/20'
-                  : hasServiceAccess
-                  ? 'bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-slate-800 text-slate-900 dark:text-amber-400 border-amber-500/60'
-                  : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                  : 'bg-slate-900 dark:bg-slate-900 hover:bg-slate-800 dark:hover:bg-slate-800 text-amber-400 border-amber-500/60'
               }`}
             >
-              <FileCheck2 className={`w-4 h-4 shrink-0 ${activeTab === 'reports' ? 'text-slate-950' : 'text-amber-500'}`} />
+              <FileCheck2 className={`w-4 h-4 shrink-0 ${activeTab === 'reports' ? 'text-slate-950' : 'text-amber-400'}`} />
               <span>ART &amp; Laudos</span>
-              {!hasServiceAccess ? (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                  <Lock className="w-2.5 h-2.5 shrink-0" />
-                  <span className="hidden sm:inline">{isUserAuthenticated ? 'Plano Pago' : 'Entrar / Plano'}</span>
-                </span>
-              ) : (
-                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
-                  activeTab === 'reports'
-                    ? 'bg-slate-950/15 text-slate-950'
-                    : isAdminAuthenticated || hasProAccess
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
-                }`}>
-                  {isAdminAuthenticated
-                    ? 'Admin'
-                    : hasProAccess
-                    ? 'Pro'
-                    : techDocsCount > 0
-                    ? `${techDocsCount}`
-                    : 'Ativo'}
-                </span>
-              )}
+              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+                activeTab === 'reports'
+                  ? 'bg-slate-950/15 text-slate-950'
+                  : 'bg-emerald-500/20 text-emerald-300'
+              }`}>
+                {isAdminAuthenticated ? 'Admin' : hasProAccess ? 'Pro' : 'Admin'}
+              </span>
+            </button>
+
+            {/* Pinned Direct Mass Invitations Automation Button */}
+            <button
+              type="button"
+              data-testid="nav-mass-invitations-btn"
+              onClick={() => onTabChange('invitations')}
+              title="Automação dos Disparos de Convites em Massa (Fila Automática WhatsApp, E-mail e CCO p/ 300+ Construtoras)"
+              className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs font-black border transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 active:scale-95 ${
+                activeTab === 'invitations'
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-500 shadow-emerald-500/20'
+                  : 'bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-slate-800 text-emerald-700 dark:text-emerald-400 border-emerald-500/60'
+              }`}
+            >
+              <Send className={`w-4 h-4 shrink-0 ${activeTab === 'invitations' ? 'text-slate-950' : 'text-emerald-500'}`} />
+              <span>Convites em Massa</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+                activeTab === 'invitations'
+                  ? 'bg-slate-950/15 text-slate-950'
+                  : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+              }`}>
+                Automação
+              </span>
             </button>
           </div>
 
@@ -460,7 +486,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
           {/* Scrollable Tabs (Full-width Row 2 on < lg so it NEVER squishes to 0px; middle flex-1 on >= lg) */}
           <div className="w-full lg:w-auto lg:flex-1 lg:order-2 min-w-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-1.5 shadow-xs flex items-center space-x-1 overflow-x-auto no-scrollbar">
-            {tabs.map((tab) => {
+            {tabs.filter((tab) => tab.id !== 'reports').map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               const isLockedService = !hasServiceAccess && SERVICE_TABS.includes(tab.id);

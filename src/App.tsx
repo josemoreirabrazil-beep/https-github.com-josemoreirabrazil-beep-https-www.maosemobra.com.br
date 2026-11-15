@@ -12,6 +12,7 @@ import { ServiceRequestsView } from './components/ServiceRequestsView';
 import { OpportunitiesView } from './components/OpportunitiesView';
 import { BatchInvitationsView } from './components/BatchInvitationsView';
 import { TechnicalReportsView } from './components/TechnicalReportsView';
+import { NotificationSettingsView } from './components/NotificationSettingsView';
 import { AdminMasterView } from './components/AdminMasterView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
@@ -148,7 +149,7 @@ export default function App() {
     ? 'free'
     : 'visitor';
 
-  const serviceTabSet = new Set<NavTab>(['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team', 'invitations']);
+  const serviceTabSet = new Set<NavTab>(['reports', 'requests', 'rdo', 'financial', 'timeline', 'calculator', 'drive', 'team']);
   const isLockedServiceTab = serviceTabSet.has(activeTab) && !canAccessServices;
 
   const openChoosePlanModal = () => {
@@ -865,7 +866,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'invitations' && canAccessServices && (
+        {activeTab === 'invitations' && (
           <BatchInvitationsView
             onNavigateToOpportunities={() => setActiveTab('opportunities')}
           />
@@ -969,6 +970,16 @@ export default function App() {
             onSaveMember={handleSaveTeamMember}
             onDeleteMember={handleDeleteTeamMember}
             initialCategoryFilter={teamCategoryFilter}
+          />
+        )}
+
+        {activeTab === 'notifications' && (
+          <NotificationSettingsView
+            currentProject={currentProject}
+            rdos={rdos}
+            expenses={expenses}
+            onNavigateToRdo={() => handleTabChange('rdo')}
+            onNavigateToFinancial={() => handleTabChange('financial')}
           />
         )}
       </main>

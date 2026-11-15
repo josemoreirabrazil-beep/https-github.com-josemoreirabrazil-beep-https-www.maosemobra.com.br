@@ -37,7 +37,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
   onNavigateToOpportunities,
 }) => {
   const [contacts, setContacts] = useState<CorporateContact[]>([]);
-  const [selectedRegion, setSelectedRegion] = useState<'ALL' | CorporateContactRegion>('ALL');
+  const [selectedRegion, setSelectedRegion] = useState<'ALL' | 'NEW_LIST' | CorporateContactRegion>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<'ALL' | CorporateContactStatus>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -77,10 +77,14 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
   const [queueCurrentIndex, setQueueCurrentIndex] = useState(0);
   const [queueTotal, setQueueTotal] = useState(0);
   const [currentQueueContact, setCurrentQueueContact] = useState<CorporateContact | null>(null);
-  const [dispatchIntervalMs, setDispatchIntervalMs] = useState(2500);
+  const [dispatchIntervalMs, setDispatchIntervalMs] = useState(1500);
+  const [autoChannel, setAutoChannel] = useState<'WhatsApp' | 'Email'>('WhatsApp');
+  const stopQueueRef = React.useRef(false);
 
-  // Modal Novo Contato
+  // Modal Novo Contato & Importação em Massa
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState(false);
+  const [bulkImportText, setBulkImportText] = useState('');
   const [newCompanyName, setNewCompanyName] = useState('');
   const [newCompanyPhone, setNewCompanyPhone] = useState('');
   const [newCompanyEmail, setNewCompanyEmail] = useState('');
@@ -105,7 +109,12 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
   // Filter contacts
   const filteredContacts = useMemo(() => {
     return contacts.filter((c) => {
-      const matchRegion = selectedRegion === 'ALL' || c.region === selectedRegion;
+      const matchRegion =
+        selectedRegion === 'ALL'
+          ? true
+          : selectedRegion === 'NEW_LIST'
+          ? c.id.startsWith('lista-') || c.id.startsWith('custom-')
+          : c.region === selectedRegion;
       const matchStatus = selectedStatus === 'ALL' || c.status === selectedStatus;
       const search = searchTerm.toLowerCase().trim();
       const matchSearch =
@@ -124,6 +133,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
     const total = contacts.length;
     const sent = contacts.filter((c) => c.status !== 'Pendente' && c.status !== 'Na Fila').length;
     const pending = total - sent;
+    const newListCount = contacts.filter((c) => c.id.startsWith('lista-') || c.id.startsWith('custom-')).length;
     const spCount = contacts.filter((c) => c.region === 'SP').length;
     const rjCount = contacts.filter((c) => c.region === 'RJ').length;
     const mgCount = contacts.filter((c) => c.region === 'MG').length;
@@ -131,7 +141,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
     const nacCount = contacts.filter((c) => c.region === 'Nacional').length;
     const intCount = contacts.filter((c) => c.region === 'Internacional').length;
 
-    return { total, sent, pending, spCount, rjCount, mgCount, baCount, nacCount, intCount };
+    return { total, sent, pending, newListCount, spCount, rjCount, mgCount, baCount, nacCount, intCount };
   }, [contacts]);
 
   // Toggle selection
@@ -203,7 +213,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
     confetti({ particleCount: 60, spread: 70 });
   };
 
-  // Automated Queue Dispatch (Simulated CRM Batch Pipeline)
+  // Automated Queue Dispatch (CRM Batch Pipeline)
   const handleStartQueue = async () => {
     const targetIds =
       selectedIds.size > 0
@@ -215,15 +225,20 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
       return;
     }
 
+    stopQueueRef.current = false;
     setIsQueueRunning(true);
     setQueueTotal(targetIds.length);
     setQueueProgress(0);
 
+    let processedCount = 0;
     for (let i = 0; i < targetIds.length; i++) {
+      if (stopQueueRef.current) break;
+
       const id = targetIds[i];
       const contact = contacts.find((c) => c.id === id);
       if (!contact) continue;
 
+      processedCount++;
       setQueueCurrentIndex(i + 1);
       setCurrentQueueContact(contact);
       setQueueProgress(Math.round(((i + 1) / targetIds.length) * 100));
@@ -231,16 +246,89 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
       // Wait interval
       await new Promise((resolve) => setTimeout(resolve, dispatchIntervalMs));
 
+      if (stopQueueRef.current) break;
+
       // Update contact status
-      const updated = updateCorporateContactStatus(id, 'Enviado', 'WhatsApp');
+      const updated = updateCorporateContactStatus(id, 'Enviado', autoChannel);
       setContacts(updated);
     }
 
     setIsQueueRunning(false);
     setCurrentQueueContact(null);
     confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
-    alert(`Sucesso! ${targetIds.length} convites foram processados e disparados no lote.`);
+    alert(`Sucesso! ${processedCount} convites foram processados e disparados no lote (${autoChannel}).`);
     setSelectedIds(new Set());
+  };
+
+  const handleStopQueue = () => {
+    stopQueueRef.current = true;
+    setIsQueueRunning(false);
+    setCurrentQueueContact(null);
+  };
+
+  // Bulk Import from Pasted Text
+  const handleBulkImportSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkImportText.trim()) return;
+
+    const lines = bulkImportText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const parsedItems: CorporateContact[] = [];
+    let current: { title: string; email: string; phoneRaw: string; extraEmail?: string } | null = null;
+
+    for (const line of lines) {
+      const emailMatch = line.match(/^\*?\s*E-mail:\s*(.+)$/i);
+      const phoneMatch = line.match(/^\*?\s*WhatsApp\s*\/\s*Telefone:\s*(.+)$/i);
+      if (emailMatch) {
+        if (current) {
+          const rawEmail = emailMatch[1].trim();
+          const parts = rawEmail.split('/').map((s) => s.trim()).filter(Boolean);
+          current.email = parts[0] || rawEmail;
+          if (parts.length > 1) current.extraEmail = rawEmail;
+        }
+      } else if (phoneMatch) {
+        if (current) {
+          current.phoneRaw = phoneMatch[1].trim();
+          const countryMatch = current.title.match(/\(([^)]+)\)\s*$/);
+          const country = countryMatch ? countryMatch[1].trim() : 'Internacional';
+          const digits = current.phoneRaw.replace(/\s*\([^)]*\)\s*$/, '').replace(/\D/g, '');
+          let region: CorporateContactRegion = 'Internacional';
+          if (country.toLowerCase().includes('brasil')) {
+            if (digits.startsWith('5511') || digits.startsWith('5519')) region = 'SP';
+            else if (digits.startsWith('5521')) region = 'RJ';
+            else if (digits.startsWith('5531')) region = 'MG';
+            else if (digits.startsWith('5581') || digits.startsWith('5571')) region = 'BA';
+            else region = 'Nacional';
+          }
+          parsedItems.push({
+            id: `custom-${Date.now()}-${parsedItems.length + 1}`,
+            name: current.title,
+            phone: current.phoneRaw,
+            whatsapp: digits || '5511999999999',
+            email: current.email,
+            region,
+            status: 'Pendente',
+            category: `Construtora & Infraestrutura (${country})`,
+            notes: current.extraEmail ? `E-mails oficiais: ${current.extraEmail}` : undefined,
+          });
+          current = null;
+        }
+      } else {
+        current = { title: line, email: '', phoneRaw: '' };
+      }
+    }
+
+    if (parsedItems.length === 0) {
+      alert('Nenhum contato reconhecido no formato esperado (Nome da Empresa / E-mail: / WhatsApp / Telefone:).');
+      return;
+    }
+
+    const nextContacts = [...parsedItems, ...contacts];
+    saveCorporateContacts(nextContacts);
+    setContacts(nextContacts);
+    setBulkImportText('');
+    setIsBulkImportModalOpen(false);
+    confetti({ particleCount: 90, spread: 70 });
+    alert(`${parsedItems.length} novos contatos corporativos importados para disparo automático e manual!`);
   };
 
   // Add new company
@@ -290,15 +378,23 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              Disparo de Convites Automático & Manual em Lote
+              Disparo de Convites Automático &amp; Manual em Lote
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Base oficial com mais de 300 construtoras, incorporadoras e empreiteiras (SP, RJ, MG, BA, Nacional e Portugal). Envie abordagens personalizadas via <strong>WhatsApp</strong> em 1 clique ou acione a <strong>Fila Automatizada CRM</strong>.
+              Base oficial atualizada com <strong>{stats.total} construtoras, incorporadoras e gigantes globais de engenharia</strong> (Brasil, Europa, EUA, Canadá, Ásia, Oriente Médio e América Latina — incluindo as <strong>{stats.newListCount} empresas da Lista Global &amp; Nacional</strong>). Envie abordagens personalizadas via <strong>WhatsApp / E-mail Manual</strong> em 1 clique ou acione a <strong>Fila Automatizada CRM</strong>.
             </p>
           </div>
 
           {/* Quick Actions in Banner */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <button
+              onClick={() => setIsBulkImportModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-black text-xs flex items-center gap-2 border border-amber-400/40 transition cursor-pointer"
+            >
+              <FileText className="w-4 h-4 text-amber-400" />
+              <span>Importar Lista em Lote</span>
+            </button>
+
             <button
               onClick={() => setIsAddModalOpen(true)}
               className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-2 border border-white/20 transition cursor-pointer"
@@ -329,7 +425,7 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
                 onClick={onNavigateToOpportunities}
                 className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer active:scale-95"
               >
-                <span>Ver Vagas & Obras</span>
+                <span>Ver Vagas &amp; Obras</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
             )}
@@ -351,18 +447,18 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
             <div className="text-xl font-black text-emerald-400 mt-0.5">{stats.sent}</div>
           </div>
           <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/50">
-            <div className="text-[10px] font-bold text-slate-400 uppercase">São Paulo (SP)</div>
-            <div className="text-xl font-black text-white mt-0.5">{stats.spCount}</div>
+            <div className="text-[10px] font-bold text-slate-400 uppercase">Lista Adicionada</div>
+            <div className="text-xl font-black text-amber-300 mt-0.5">{stats.newListCount}</div>
           </div>
           <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/50">
-            <div className="text-[10px] font-bold text-slate-400 uppercase">RJ / MG / BA</div>
+            <div className="text-[10px] font-bold text-slate-400 uppercase">Brasil (SP/RJ/MG/BA/Nac)</div>
             <div className="text-xl font-black text-white mt-0.5">
-              {stats.rjCount + stats.mgCount + stats.baCount}
+              {stats.spCount + stats.rjCount + stats.mgCount + stats.baCount + stats.nacCount}
             </div>
           </div>
           <div className="p-3 rounded-2xl bg-slate-800/60 border border-slate-700/50">
-            <div className="text-[10px] font-bold text-slate-400 uppercase">Internacional</div>
-            <div className="text-xl font-black text-sky-400 mt-0.5">{stats.intCount} (PT)</div>
+            <div className="text-[10px] font-bold text-slate-400 uppercase">Internacional / Global</div>
+            <div className="text-xl font-black text-sky-400 mt-0.5">{stats.intCount}</div>
           </div>
         </div>
       </div>
@@ -456,7 +552,22 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Channel Selector */}
+            <div className="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-xs">
+              <Send className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-slate-400">Canal:</span>
+              <select
+                value={autoChannel}
+                onChange={(e) => setAutoChannel(e.target.value as 'WhatsApp' | 'Email')}
+                disabled={isQueueRunning}
+                className="bg-transparent text-emerald-400 font-bold focus:outline-none"
+              >
+                <option value="WhatsApp" className="bg-slate-900 text-white">WhatsApp + CRM</option>
+                <option value="Email" className="bg-slate-900 text-white">E-mail Corporativo</option>
+              </select>
+            </div>
+
             {/* Interval Selector */}
             <div className="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 text-xs">
               <Clock className="w-3.5 h-3.5 text-amber-400" />
@@ -467,36 +578,34 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
                 disabled={isQueueRunning}
                 className="bg-transparent text-amber-400 font-bold focus:outline-none"
               >
+                <option value={500} className="bg-slate-900 text-white">0.5s (Ultra Rápido)</option>
                 <option value={1500} className="bg-slate-900 text-white">1.5s (Rápido)</option>
                 <option value={2500} className="bg-slate-900 text-white">2.5s (Recomendado)</option>
                 <option value={4000} className="bg-slate-900 text-white">4.0s (Seguro)</option>
               </select>
             </div>
 
-            {/* Launch Button */}
-            <button
-              onClick={handleStartQueue}
-              disabled={isQueueRunning || filteredContacts.length === 0}
-              className={`px-6 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 shadow-lg transition active:scale-95 cursor-pointer ${
-                isQueueRunning
-                  ? 'bg-amber-600 text-white cursor-wait'
-                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
-              }`}
-            >
-              {isQueueRunning ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Disparando Fila ({queueCurrentIndex}/{queueTotal})...</span>
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4" />
-                  <span>
-                    Disparar Lote {selectedIds.size > 0 ? `(${selectedIds.size} selecionados)` : `(${filteredContacts.filter(c => c.status === 'Pendente').length} pendentes)`}
-                  </span>
-                </>
-              )}
-            </button>
+            {/* Launch / Stop Buttons */}
+            {isQueueRunning ? (
+              <button
+                onClick={handleStopQueue}
+                className="px-5 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition cursor-pointer"
+              >
+                <Pause className="w-4 h-4" />
+                <span>Pausar Fila ({queueCurrentIndex}/{queueTotal})</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleStartQueue}
+                disabled={filteredContacts.length === 0}
+                className="px-6 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 shadow-lg transition active:scale-95 cursor-pointer bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20"
+              >
+                <Send className="w-4 h-4" />
+                <span>
+                  Disparar Lote Automático {selectedIds.size > 0 ? `(${selectedIds.size} selecionados)` : `(${filteredContacts.filter(c => c.status === 'Pendente').length} pendentes)`}
+                </span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -538,18 +647,24 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
 
         {/* Region Filter Buttons */}
         <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto">
-          <span className="text-[11px] font-bold text-slate-400 uppercase mr-1">Região:</span>
-          {(['ALL', 'SP', 'RJ', 'MG', 'BA', 'Nacional', 'Internacional'] as const).map((reg) => (
+          <span className="text-[11px] font-bold text-slate-400 uppercase mr-1">Região / Lista:</span>
+          {(['ALL', 'NEW_LIST', 'SP', 'RJ', 'MG', 'BA', 'Nacional', 'Internacional'] as const).map((reg) => (
             <button
               key={reg}
               onClick={() => setSelectedRegion(reg)}
               className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
                 selectedRegion === reg
                   ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                  : reg === 'NEW_LIST'
+                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
               }`}
             >
-              {reg === 'ALL' ? 'Todas' : reg}
+              {reg === 'ALL'
+                ? `Todas (${stats.total})`
+                : reg === 'NEW_LIST'
+                ? `Lista Adicionada (${stats.newListCount})`
+                : reg}
             </button>
           ))}
         </div>
@@ -834,6 +949,60 @@ export const BatchInvitationsView: React.FC<BatchInvitationsViewProps> = ({
                 >
                   <Check className="w-4 h-4" />
                   <span>Salvar na Base</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* 📋 MODAL: IMPORTAR LISTA DE CONVITES EM LOTE (TEXTO) */}
+      {/* ======================================================== */}
+      {isBulkImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                <h3 className="font-black text-sm uppercase tracking-wide">
+                  Importar Lista de Convites p/ Disparos Automáticos e Manuais
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsBulkImportModalOpen(false)}
+                className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleBulkImportSubmit} className="p-6 space-y-4 text-xs">
+              <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
+                Cole abaixo a lista de construtoras e incorporadoras no formato padrão (Nome da Empresa + País, linha <code>E-mail:</code> e linha <code>WhatsApp / Telefone:</code>):
+              </p>
+              <textarea
+                rows={10}
+                required
+                value={bulkImportText}
+                onChange={(e) => setBulkImportText(e.target.value)}
+                placeholder={`VINCI SA (França)\nE-mail: contact@vinci.com\nWhatsApp / Telefone: +33 1 57 98 61 00\n\nConstrutora Norberto Odebrecht / Novonor (Brasil)\n* E-mail: contato@novonor.com\n* WhatsApp / Telefone: +55 11 3096 1000`}
+                className="w-full px-4 py-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-xs focus:ring-2 focus:ring-emerald-500"
+              />
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkImportModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black shadow-lg transition cursor-pointer flex items-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Importar Lista para Disparos</span>
                 </button>
               </div>
             </form>

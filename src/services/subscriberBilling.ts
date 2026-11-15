@@ -9,10 +9,65 @@ import type {
 } from '../types';
 import { getCachedAdminSession } from './adminAuth';
 
-const LOCAL_STORAGE_KEY = 'maos_em_obra_subscriber_payments_v3';
+const LOCAL_STORAGE_KEY = 'maos_em_obra_subscriber_payments_v4';
 const PLANS_STORAGE_KEY = 'maos_em_obra_subscription_plans_v5';
 const ACTIVE_SUBSCRIPTION_STORAGE_KEY = 'maos_em_obra_active_subscription_v1';
 export const SUBSCRIPTION_UPDATED_EVENT = 'maos-em-obra-subscription-updated';
+
+const CLIENT_PERIOD_CATALOG = [
+  { period: '2026-08', label: '1º Período (Ago/2026)' },
+  { period: '2026-09', label: '2º Período (Set/2026)' },
+  { period: '2026-10/11', label: '3º Período (Out-Nov/2026)' },
+  { period: '2026-12', label: '4º Período (Dez/2026)' },
+  { period: '2027-01', label: '5º Período (Jan/2027)' },
+  { period: '2027-02', label: '6º Período (Fev/2027)' },
+];
+
+export function buildClientPeriodsBreakdown(
+  unitPlanAmount: number,
+  periodsCount: number,
+  isPaid = false
+): Array<{
+  period: string;
+  label: string;
+  amount: number;
+  status: 'Não Compensado (Refazer Checkout)' | 'Pago';
+}> {
+  const count = Math.max(1, Math.min(12, Math.round(Number(periodsCount) || 1)));
+  const unit = Number((Number(unitPlanAmount) || 0).toFixed(2));
+  const list: Array<{
+    period: string;
+    label: string;
+    amount: number;
+    status: 'Não Compensado (Refazer Checkout)' | 'Pago';
+  }> = [];
+  for (let i = 0; i < count; i++) {
+    const preset = CLIENT_PERIOD_CATALOG[i] || {
+      period: `Período ${i + 1}`,
+      label: `${i + 1}º Período`,
+    };
+    list.push({
+      period: preset.period,
+      label: preset.label,
+      amount: unit,
+      status: isPaid ? 'Pago' : 'Não Compensado (Refazer Checkout)',
+    });
+  }
+  return list;
+}
+
+export function formatClientPeriodsLabel(
+  periodsCountOrBreakdown: number | Array<{ period: string; label?: string }>
+): string {
+  const count = Array.isArray(periodsCountOrBreakdown)
+    ? Math.max(1, periodsCountOrBreakdown.length)
+    : Math.max(1, Math.round(Number(periodsCountOrBreakdown) || 1));
+  if (count === 1) return '1 período mensal (Out-Nov/2026)';
+  if (count === 2) return '2 períodos acumulados (Set/2026 e Out-Nov/2026)';
+  if (count === 3) return '3 períodos acumulados (Ago/2026, Set/2026 e Out-Nov/2026)';
+  if (count === 6) return '6 períodos (Ciclo Promocional Completo de 6 Meses)';
+  return `${count} períodos acumulados`;
+}
 
 export interface ActiveSubscriptionState {
   planId: string;
@@ -125,8 +180,15 @@ export function normalizePendingSubscriberCharges(payments: SubscriberPayment[])
       return p;
     }
 
-    const targetPrice = getReducedPlanPrice(p.planType, p.amount);
-    if (Math.abs((Number(p.amount) || 0) - targetPrice) <= 0.009) {
+    const periodsCount = Math.max(1, Math.min(12, Math.round(Number(p.periodsCount) || 3)));
+    const unitPrice = getReducedPlanPrice(p.planType, p.unitPlanAmount ?? p.amount);
+    const targetPrice = Number((unitPrice * periodsCount).toFixed(2));
+
+    if (
+      Math.abs((Number(p.amount) || 0) - targetPrice) <= 0.009 &&
+      p.periodsCount === periodsCount &&
+      p.unitPlanAmount === unitPrice
+    ) {
       return p;
     }
 
@@ -136,16 +198,14 @@ export function normalizePendingSubscriberCharges(payments: SubscriberPayment[])
 
     return {
       ...p,
+      unitPlanAmount: unitPrice,
+      periodsCount,
+      periodsLabel: formatClientPeriodsLabel(periodsCount),
+      periodsBreakdown: buildClientPeriodsBreakdown(unitPrice, periodsCount, false),
       amount: targetPrice,
       status: targetPrice <= 0 ? ('Isento / Cortesia' as const) : p.status,
-      billingStatus: targetPrice <= 0 ? undefined : ('Não Emitida' as const),
-      billingLink: undefined,
-      pixTicketUrl: undefined,
-      pixCopyPaste: undefined,
-      mpPreferenceId: undefined,
-      mpPaymentId: undefined,
-      billingMessage: undefined,
-      notes: `Valor pendente ajustado de R$ ${previousFormatted} para R$ ${targetFormatted} (${p.planType}).`,
+      billingStatus: targetPrice <= 0 ? undefined : (p.billingStatus || ('Cobrança Emitida' as const)),
+      notes: `Valor pendente ajustado de R$ ${previousFormatted} para R$ ${targetFormatted} (${periodsCount} períodos x R$ ${unitPrice.toFixed(2)} — ${p.planType}).`,
     };
   });
 
@@ -280,15 +340,21 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 99123-4567',
     subscriberRole: 'Técnico / Projetista',
     planType: 'Mensal Pro',
-    amount: 29.90,
-    method: 'PIX',
-    status: 'Aprovado',
-    paymentDate: '2026-08-25',
-    dueDate: '2026-09-25',
-    reference: 'Assinatura Mensal Pro - Gestão & RDO Ilimitado',
-    notes: 'Comprovante PIX validado com sucesso.',
-    transactionId: 'PIX-73998599213-982103',
+    unitPlanAmount: 29.90,
+    periodsCount: 3,
+    periodsLabel: '3 períodos acumulados (Ago/2026, Set/2026 e Out-Nov/2026)',
+    periodsBreakdown: buildClientPeriodsBreakdown(29.90, 3, false),
+    amount: 89.70,
+    method: 'Mercado Pago',
+    status: 'Pendente',
+    paymentDate: '',
+    dueDate: '2026-11-20',
+    reference: 'Cobrança Acumulada (3 Períodos: Ago, Set e Out-Nov/2026) — Mensal Pro (R$ 29,90/mês)',
+    notes: 'Pagamentos anteriores não compensados devido a erro no checkout do Mercado Pago. Valor atualizado com os 3 períodos pelo plano reduzido (3x R$ 29,90 = R$ 89,70) para refazer o checkout.',
+    transactionId: 'SUB-PAY001-3PER',
     projectCount: 4,
+    billingStatus: 'Cobrança Emitida',
+    billingExternalRef: 'SUB-PAY001-3PER',
   },
   {
     id: 'sub-pay-002',
@@ -297,15 +363,21 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 98844-3322',
     subscriberRole: 'Construtora / Empreiteiro',
     planType: 'Mensal Construtor',
-    amount: 49.90,
+    unitPlanAmount: 49.90,
+    periodsCount: 3,
+    periodsLabel: '3 períodos acumulados (Ago/2026, Set/2026 e Out-Nov/2026)',
+    periodsBreakdown: buildClientPeriodsBreakdown(49.90, 3, false),
+    amount: 149.70,
     method: 'Mercado Pago',
-    status: 'Aprovado',
-    paymentDate: '2026-08-10',
-    dueDate: '2026-09-10',
-    reference: 'Plano Mensal Construtor Master (Multiobras + Drive Backup)',
-    notes: 'Processado via Mercado Pago Checkout Pro.',
-    transactionId: 'MP-PREF-9948172635',
+    status: 'Pendente',
+    paymentDate: '',
+    dueDate: '2026-11-20',
+    reference: 'Cobrança Acumulada (3 Períodos: Ago, Set e Out-Nov/2026) — Mensal Construtor (R$ 49,90/mês)',
+    notes: 'Pagamentos anteriores não compensados devido a erro no checkout do Mercado Pago. Valor atualizado com os 3 períodos pelo plano reduzido (3x R$ 49,90 = R$ 149,70) para refazer o checkout.',
+    transactionId: 'SUB-PAY002-3PER',
     projectCount: 12,
+    billingStatus: 'Cobrança Emitida',
+    billingExternalRef: 'SUB-PAY002-3PER',
   },
   {
     id: 'sub-pay-003',
@@ -314,15 +386,21 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 99911-8877',
     subscriberRole: 'Loja / Fornecedor',
     planType: 'Mensal Pro',
-    amount: 29.90,
-    method: 'PIX',
-    status: 'Aprovado',
-    paymentDate: '2026-08-18',
-    dueDate: '2026-09-18',
-    reference: 'Catálogo de Materiais e Cotações Rápidas',
-    notes: 'Pagamento recebido na chave PIX do Master.',
-    transactionId: 'PIX-73998599213-441092',
+    unitPlanAmount: 29.90,
+    periodsCount: 3,
+    periodsLabel: '3 períodos acumulados (Ago/2026, Set/2026 e Out-Nov/2026)',
+    periodsBreakdown: buildClientPeriodsBreakdown(29.90, 3, false),
+    amount: 89.70,
+    method: 'Mercado Pago',
+    status: 'Pendente',
+    paymentDate: '',
+    dueDate: '2026-11-20',
+    reference: 'Cobrança Acumulada (3 Períodos: Ago, Set e Out-Nov/2026) — Mensal Pro (R$ 29,90/mês)',
+    notes: 'Pagamentos anteriores não compensados devido a erro no checkout do Mercado Pago. Valor atualizado com os 3 períodos pelo plano reduzido (3x R$ 29,90 = R$ 89,70) para refazer o checkout.',
+    transactionId: 'SUB-PAY003-3PER',
     projectCount: 8,
+    billingStatus: 'Cobrança Emitida',
+    billingExternalRef: 'SUB-PAY003-3PER',
   },
   {
     id: 'sub-pay-004',
@@ -331,6 +409,9 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 98133-7766',
     subscriberRole: 'Prestador de Serviço',
     planType: 'Gratuito Lançamento',
+    unitPlanAmount: 0.00,
+    periodsCount: 1,
+    periodsLabel: 'Isento / Gratuito Lançamento',
     amount: 0.00,
     method: 'Dinheiro',
     status: 'Isento / Cortesia',
@@ -348,6 +429,9 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 99201-1122',
     subscriberRole: 'Solicitante / Cliente',
     planType: 'Gratuito Lançamento',
+    unitPlanAmount: 0.00,
+    periodsCount: 1,
+    periodsLabel: 'Isento / Gratuito Lançamento',
     amount: 0.00,
     method: 'PIX',
     status: 'Isento / Cortesia',
@@ -365,15 +449,21 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 98877-0099',
     subscriberRole: 'Técnico / Projetista',
     planType: 'Mensal Pro',
-    amount: 29.90,
-    method: 'PIX',
+    unitPlanAmount: 29.90,
+    periodsCount: 3,
+    periodsLabel: '3 períodos acumulados (Ago/2026, Set/2026 e Out-Nov/2026)',
+    periodsBreakdown: buildClientPeriodsBreakdown(29.90, 3, false),
+    amount: 89.70,
+    method: 'Mercado Pago',
     status: 'Pendente',
-    paymentDate: '2026-08-28',
-    dueDate: '2026-09-02',
-    reference: 'Renovação Mensal Pro Setembro',
-    notes: 'Aguardando confirmação do comprovante PIX.',
-    transactionId: 'PIX-PENDING-771829',
+    paymentDate: '',
+    dueDate: '2026-11-20',
+    reference: 'Cobrança Acumulada (3 Períodos: Ago, Set e Out-Nov/2026) — Mensal Pro (R$ 29,90/mês)',
+    notes: 'Pagamentos anteriores não compensados devido a erro no checkout do Mercado Pago. Valor atualizado com os 3 períodos pelo plano reduzido (3x R$ 29,90 = R$ 89,70) para refazer o checkout.',
+    transactionId: 'SUB-PAY006-3PER',
     projectCount: 3,
+    billingStatus: 'Cobrança Emitida',
+    billingExternalRef: 'SUB-PAY006-3PER',
   },
   {
     id: 'sub-pay-007',
@@ -382,15 +472,21 @@ const INITIAL_LOCAL_PAYMENTS: SubscriberPayment[] = [
     subscriberPhone: '(73) 99188-4455',
     subscriberRole: 'Prestador de Serviço',
     planType: 'Mensal Básico',
-    amount: 25.00,
+    unitPlanAmount: 25.00,
+    periodsCount: 3,
+    periodsLabel: '3 períodos acumulados (Ago/2026, Set/2026 e Out-Nov/2026)',
+    periodsBreakdown: buildClientPeriodsBreakdown(25.00, 3, false),
+    amount: 75.00,
     method: 'Mercado Pago',
-    status: 'Aprovado',
-    paymentDate: '2026-08-29',
-    dueDate: '2026-09-29',
-    reference: 'Assinatura Mensal Básico - Propostas & Ferramentas de Obra',
-    notes: 'Assinatura mensal aprovada via Mercado Pago.',
-    transactionId: 'MP-FEE-881920',
+    status: 'Pendente',
+    paymentDate: '',
+    dueDate: '2026-11-20',
+    reference: 'Cobrança Acumulada (3 Períodos: Ago, Set e Out-Nov/2026) — Mensal Básico (R$ 25,00/mês)',
+    notes: 'Pagamentos anteriores não compensados devido a erro no checkout do Mercado Pago. Valor atualizado com os 3 períodos pelo plano reduzido (3x R$ 25,00 = R$ 75,00) para refazer o checkout.',
+    transactionId: 'SUB-PAY007-3PER',
     projectCount: 1,
+    billingStatus: 'Cobrança Emitida',
+    billingExternalRef: 'SUB-PAY007-3PER',
   }
 ];
 
@@ -455,12 +551,14 @@ export async function fetchSubscribersCashflow(): Promise<{
   
   const monthlyRecurringRevenue = approved
     .filter(p => Number(p.amount) > 0)
-    .reduce((a, b) => a + Number(b.amount), 0);
+    .reduce((a, b) => a + (Number(b.unitPlanAmount) || Number(b.amount)), 0);
 
   const totalSubscribers = payments.length;
   const freeTierSubscribers = payments.filter(p => p.planType === 'Gratuito Lançamento' || p.status === 'Isento / Cortesia').length;
   const activePaidSubscribers = approved.filter(p => Number(p.amount) > 0).length;
   const overdueSubscribers = payments.filter(p => p.status === 'Atrasado').length;
+  const payingSubscribersCount = payments.filter(p => p.planType !== 'Gratuito Lançamento' && p.status !== 'Isento / Cortesia').length;
+  const totalPendingPeriodsCount = pending.reduce((acc, curr) => acc + (Number(curr.periodsCount) || 1), 0);
 
   return {
     summary: {
@@ -471,6 +569,8 @@ export async function fetchSubscribersCashflow(): Promise<{
       activePaidSubscribers,
       freeTierSubscribers,
       overdueSubscribers,
+      payingSubscribersCount,
+      totalPendingPeriodsCount,
     },
     payments,
   };
@@ -702,7 +802,13 @@ export async function emitSubscribersBillingBatch(
 export async function adjustPendingSubscribersBilling(
   options?: {
     reemitMercadoPago?: boolean;
-    updates?: Array<{ id: string; planType?: string; amount?: number }>;
+    updates?: Array<{
+      id: string;
+      planType?: string;
+      amount?: number;
+      unitPlanAmount?: number;
+      periodsCount?: number;
+    }>;
   },
   explicitToken?: string
 ): Promise<{
@@ -713,6 +819,8 @@ export async function adjustPendingSubscribersBilling(
     id: string;
     subscriberName: string;
     planType: string;
+    periodsCount?: number;
+    unitPlanAmount?: number;
     previousAmount: number;
     newAmount: number;
   }>;
@@ -1037,12 +1145,15 @@ export interface NoticeDispatchRecipient {
 }
 
 export const DEFAULT_CHECKOUT_RECOVERY_NOTICE =
-  'Olá! Você está recebendo esta nova cobrança porque os valores anteriores não foram compensados por conta de um erro técnico que havia no checkout do Mercado Pago (problema já corrigido). Para apoiar nossos assinantes, reduzimos os valores dos planos por 6 meses: Mensal Básico R$ 25,00/mês, Mensal Pro R$ 29,90/mês, Mensal Construtor R$ 49,90/mês e Anual Construtor R$ 499,00/ano.';
+  'Olá! Você está recebendo a cobrança atualizada de todos os períodos da plataforma Mãos em Obra porque os pagamentos anteriores não foram compensados (R$ 0,00 faturado/compensado até o momento) devido a um erro técnico que havia no checkout do Mercado Pago (problema já corrigido). Para apoiar nossos assinantes, reduzimos os valores dos planos por 6 meses: Mensal Básico R$ 25,00/mês, Mensal Pro R$ 29,90/mês, Mensal Construtor R$ 49,90/mês e Anual Construtor R$ 499,00/ano. Refaça seu checkout pelo link atualizado ou PIX para compensação imediata.';
 
 export function buildCheckoutRecoveryMessage(
   subscriber: {
     subscriberName: string;
     planType: string;
+    unitPlanAmount?: number;
+    periodsCount?: number;
+    periodsLabel?: string;
     amount: number;
     billingLink?: string;
     pixTicketUrl?: string;
@@ -1050,20 +1161,28 @@ export function buildCheckoutRecoveryMessage(
   },
   customIntro?: string
 ): string {
+  const periods = Math.max(1, Number(subscriber.periodsCount) || 3);
+  const unitVal =
+    Number(subscriber.unitPlanAmount) ||
+    getReducedPlanPrice(subscriber.planType, Number((Number(subscriber.amount) / periods).toFixed(2))) ||
+    Number((Number(subscriber.amount) / periods).toFixed(2));
+  const unitFormatted = unitVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   const amountFormatted = (Number(subscriber.amount) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  const periodsText = subscriber.periodsLabel || formatClientPeriodsLabel(periods);
   const intro = (customIntro || '').trim()
     ? customIntro!.trim()
-    : 'Informamos que você está recebendo esta nova cobrança porque os valores anteriores não foram compensados por conta de um erro que havia no checkout do Mercado Pago (já corrigido).\n\nReduzimos os valores dos planos por *6 meses*:\n• *Mensal Básico:* R$ 25,00/mês\n• *Mensal Pro:* R$ 29,90/mês\n• *Mensal Construtor:* R$ 49,90/mês\n• *Anual Construtora/Empreiteira:* R$ 499,00/ano';
+    : 'Informamos que você está recebendo a cobrança de todos os períodos porque os valores anteriores não foram compensados (R$ 0,00 compensado até o momento) por conta de um erro que havia no checkout do Mercado Pago (já corrigido).\n\nReduzimos os valores dos planos por *6 meses*:\n• *Mensal Básico:* R$ 25,00/mês\n• *Mensal Pro:* R$ 29,90/mês\n• *Mensal Construtor:* R$ 49,90/mês\n• *Anual Construtora/Empreiteira:* R$ 499,00/ano';
 
   return [
     `Olá, *${subscriber.subscriberName}*!`,
     ``,
     intro,
     ``,
-    `📌 *Sua assinatura / cobrança atualizada:*`,
-    `• *Plano:* ${subscriber.planType}`,
-    `• *Novo valor reduzido (6 meses):* R$ ${amountFormatted}`,
-    subscriber.billingLink ? `\n💳 *Pagar via Mercado Pago (Checkout Corrigido):*\n${subscriber.billingLink}` : '',
+    `📌 *Resumo dos Períodos p/ Refazer o Checkout:*`,
+    `• *Plano:* ${subscriber.planType} (R$ ${unitFormatted}/mês na promoção de 6 meses)`,
+    `• *Períodos incluídos:* ${periodsText} (${periods}x R$ ${unitFormatted})`,
+    `• *Valor Total a Compensar:* R$ ${amountFormatted}`,
+    subscriber.billingLink ? `\n💳 *Refazer Checkout via Mercado Pago (Checkout Corrigido):*\n${subscriber.billingLink}` : '',
     subscriber.pixTicketUrl ? `\n🧾 *Fatura PIX Direta (QR Code):*\n${subscriber.pixTicketUrl}` : '',
     subscriber.pixCopyPaste ? `\n💠 *PIX Copia e Cola (Mercado Pago):*\n${subscriber.pixCopyPaste}` : '',
     `\nAssim que compensar, a liberação no sistema é automática.`,

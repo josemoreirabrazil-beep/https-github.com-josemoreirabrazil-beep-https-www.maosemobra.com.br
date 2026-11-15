@@ -743,10 +743,15 @@ export function loadCorporateContacts(): CorporateContact[] {
       return INITIAL_CORPORATE_CONTACTS;
     }
     const contacts: CorporateContact[] = JSON.parse(raw);
-    // If stored array is smaller than the initial dataset (e.g. earlier test), merge to include full 300+
-    if (contacts.length < INITIAL_CORPORATE_CONTACTS.length) {
-      const existingMap = new Map(contacts.map(c => [c.id, c]));
-      const merged = INITIAL_CORPORATE_CONTACTS.map(initial => existingMap.get(initial.id) || initial);
+    const existingMap = new Map(contacts.map(c => [c.id, c]));
+    const initialIds = new Set(INITIAL_CORPORATE_CONTACTS.map(c => c.id));
+    const missingInitial = INITIAL_CORPORATE_CONTACTS.some(init => !existingMap.has(init.id));
+    if (missingInitial || contacts.length < INITIAL_CORPORATE_CONTACTS.length) {
+      const customContacts = contacts.filter(c => !initialIds.has(c.id));
+      const merged = [
+        ...customContacts,
+        ...INITIAL_CORPORATE_CONTACTS.map(initial => existingMap.get(initial.id) || initial),
+      ];
       localStorage.setItem(STORAGE_KEYS.CORPORATE_CONTACTS, JSON.stringify(merged));
       return merged;
     }

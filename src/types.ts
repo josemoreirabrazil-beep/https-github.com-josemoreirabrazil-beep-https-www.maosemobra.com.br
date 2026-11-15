@@ -307,6 +307,13 @@ export type SubscriberBillingStatus =
   | 'Enviada'
   | 'Pago no MP';
 
+export interface SubscriberPeriodChargeItem {
+  period: string;
+  label: string;
+  amount: number;
+  status: 'Não Compensado (Refazer Checkout)' | 'Pago';
+}
+
 export interface SubscriberPayment {
   id: string;
   subscriberName: string;
@@ -314,6 +321,10 @@ export interface SubscriberPayment {
   subscriberPhone: string;
   subscriberRole: SubscriberRole;
   planType: SubscriberPlan;
+  unitPlanAmount?: number;
+  periodsCount?: number;
+  periodsLabel?: string;
+  periodsBreakdown?: SubscriberPeriodChargeItem[];
   amount: number;
   method: SubscriberPaymentMethod;
   status: SubscriberPaymentStatus;
@@ -332,7 +343,7 @@ export interface SubscriberPayment {
   billingExternalRef?: string;
   billingEmittedAt?: string;
   billingSentAt?: string;
-  billingChannel?: 'WhatsApp' | 'Email' | 'Link Copiado';
+  billingChannel?: 'WhatsApp' | 'Email' | 'Link Copiado' | string;
   billingMessage?: string;
   mpVerifiedStatus?: string;
 }
@@ -360,6 +371,8 @@ export interface SubscriberCashflowSummary {
   activePaidSubscribers: number;
   freeTierSubscribers: number;
   overdueSubscribers: number;
+  payingSubscribersCount?: number;
+  totalPendingPeriodsCount?: number;
 }
 
 export interface RealSubscriberStatusItem {
@@ -708,6 +721,10 @@ export interface FiscalConfiguration {
   cnpj: string;
   cnpjFormatted: string;
   certificateVaultEncrypted?: boolean;
+  vaultSecretConfigured?: boolean;
+  vaultCipherAlgorithm?: string;
+  vaultKeyFingerprint?: string;
+  vaultFilePersisted?: boolean;
   webActivities: WebServiceCnaeActivity[];
   certificate: DigitalCertificateProfile;
   apiIntegration?: FiscalApiIntegrationConfig;

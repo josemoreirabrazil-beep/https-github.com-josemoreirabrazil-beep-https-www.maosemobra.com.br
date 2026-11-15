@@ -28,6 +28,7 @@ import type {
   TeamMember,
   ServiceRequest,
   SubscriberPayment,
+  SubscriberPeriodChargeItem,
   SubscriptionPlanPricing,
   SubscriberPlan,
   SubscriberRole,
@@ -39,6 +40,8 @@ import {
   markSubscribersBillingSent,
   adjustPendingSubscribersBilling,
   getReducedPlanPrice,
+  buildClientPeriodsBreakdown,
+  formatClientPeriodsLabel,
   INITIAL_PLANS,
   DEFAULT_CHECKOUT_RECOVERY_NOTICE,
   buildCheckoutRecoveryMessage,
@@ -69,6 +72,10 @@ interface BillableCandidate {
   subscriberPhone: string;
   subscriberRole: SubscriberRole;
   planType: SubscriberPlan;
+  unitPlanAmount: number;
+  periodsCount: number;
+  periodsLabel: string;
+  periodsBreakdown: SubscriberPeriodChargeItem[];
   amount: number;
   status: string;
   dueDate: string;
@@ -132,7 +139,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
   const [isSyncingMp, setIsSyncingMp] = useState(false);
   const [statusNotice, setStatusNotice] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const prevServerSnapshotRef = useRef<Map<string, { amount: number; planType: string; billingExternalRef?: string; billingLink?: string }>>(new Map());
+  const prevServerSnapshotRef = useRef<Map<string, { amount: number; planType: string; periodsCount?: number; billingExternalRef?: string; billingLink?: string }>>(new Map());
 
   // Live Mercado Pago account audit state
   const [liveMpPayments, setLiveMpPayments] = useState<LiveMercadoPagoPayment[]>([]);
@@ -184,6 +191,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
           !prevSnap ||
           Math.abs(prevSnap.amount - (Number(sub.amount) || 0)) > 0.009 ||
           prevSnap.planType !== sub.planType ||
+          prevSnap.periodsCount !== sub.periodsCount ||
           prevSnap.billingExternalRef !== sub.billingExternalRef ||
           prevSnap.billingLink !== sub.billingLink;
 
@@ -192,6 +200,29 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
         if (emailKey) seenEmails.add(emailKey);
         if (nameKey) seenNames.add(nameKey);
 
+        const resolvedPlan = serverChanged ? sub.planType : (existing?.planType || sub.planType);
+        const resolvedUnit =
+          serverChanged
+            ? Number(sub.unitPlanAmount) || getReducedPlanPrice(resolvedPlan, 29.90)
+            : existing?.unitPlanAmount || Number(sub.unitPlanAmount) || getReducedPlanPrice(resolvedPlan, 29.90);
+        const resolvedPeriodsCount =
+          serverChanged
+            ? Math.max(1, Number(sub.periodsCount) || 3)
+            : Math.max(1, existing?.periodsCount || Number(sub.periodsCount) || 3);
+        const resolvedAmount = serverChanged
+          ? Number(sub.amount) || Number((resolvedUnit * resolvedPeriodsCount).toFixed(2))
+          : existing?.amount !== undefined
+          ? existing.amount
+          : Number(sub.amount) || Number((resolvedUnit * resolvedPeriodsCount).toFixed(2));
+        const resolvedBreakdown =
+          serverChanged && sub.periodsBreakdown && sub.periodsBreakdown.length > 0
+            ? sub.periodsBreakdown
+            : buildClientPeriodsBreakdown(resolvedUnit, resolvedPeriodsCount);
+        const resolvedPeriodsLabel =
+          serverChanged && sub.periodsLabel
+            ? sub.periodsLabel
+            : formatClientPeriodsLabel(resolvedBreakdown);
+
         nextList.push({
           id: sub.id,
           source: 'Assinante',
@@ -199,13 +230,15 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
           subscriberEmail: sub.subscriberEmail || '',
           subscriberPhone: sub.subscriberPhone || '',
           subscriberRole: sub.subscriberRole,
-          planType: serverChanged ? sub.planType : (existing?.planType || sub.planType),
-          amount: serverChanged
-            ? (Number(sub.amount) || getReducedPlanPrice(sub.planType, 29.90))
-            : (existing?.amount !== undefined ? existing.amount : Number(sub.amount) || 29.90),
+          planType: resolvedPlan,
+          unitPlanAmount: resolvedUnit,
+          periodsCount: resolvedPeriodsCount,
+          periodsLabel: resolvedPeriodsLabel,
+          periodsBreakdown: resolvedBreakdown,
+          amount: resolvedAmount,
           status: sub.status,
           dueDate: sub.dueDate || defaultDue,
-          billingStatus: sub.billingStatus || (sub.mpVerifiedStatus === 'approved' ? 'Pago no MP' : 'Não Emitida'),
+          billingStatus: sub.billingStatus || (sub.mpVerifiedStatus === 'approved' ? 'Pago no MP' : 'Cobrança Emitida'),
           billingLink: sub.billingLink ?? (serverChanged ? undefined : existing?.billingLink),
           pixTicketUrl: sub.pixTicketUrl ?? (serverChanged ? undefined : existing?.pixTicketUrl),
           pixCopyPaste: sub.pixCopyPaste ?? (serverChanged ? undefined : existing?.pixCopyPaste),
@@ -222,7 +255,12 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
 
       // 2. Optional: Import real platform users (Projects clients, Service Requests, Team, Service Providers)
       if (includePlatformUsers) {
-        const pushExternal = (raw: Omit<BillableCandidate, 'status' | 'dueDate'>) => {
+        const pushExternal = (
+          raw: Omit<
+            BillableCandidate,
+            'status' | 'dueDate' | 'unitPlanAmount' | 'periodsCount' | 'periodsLabel' | 'periodsBreakdown'
+          >
+        ) => {
           const emailKey = raw.subscriberEmail.trim().toLowerCase();
           const nameKey = raw.subscriberName.trim().toLowerCase();
           if (!nameKey) return;
@@ -232,13 +270,27 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
           seenNames.add(nameKey);
 
           const existing = prevMap.get(raw.id);
+          const resolvedPlan = existing?.planType || raw.planType;
+          const resolvedUnit = existing?.unitPlanAmount || getReducedPlanPrice(resolvedPlan, raw.amount);
+          const resolvedPeriodsCount = Math.max(1, existing?.periodsCount || 3);
+          const resolvedBreakdown = buildClientPeriodsBreakdown(resolvedUnit, resolvedPeriodsCount);
+          const resolvedLabel = formatClientPeriodsLabel(resolvedBreakdown);
+          const resolvedAmount =
+            existing?.amount !== undefined
+              ? existing.amount
+              : Number((resolvedUnit * resolvedPeriodsCount).toFixed(2));
+
           nextList.push({
             ...raw,
-            planType: existing?.planType || raw.planType,
-            amount: existing?.amount !== undefined ? existing.amount : raw.amount,
+            planType: resolvedPlan,
+            unitPlanAmount: resolvedUnit,
+            periodsCount: resolvedPeriodsCount,
+            periodsLabel: resolvedLabel,
+            periodsBreakdown: resolvedBreakdown,
+            amount: resolvedAmount,
             status: 'Pendente',
             dueDate: defaultDue,
-            billingStatus: existing?.billingStatus || 'Não Emitida',
+            billingStatus: existing?.billingStatus || 'Cobrança Emitida',
             billingLink: existing?.billingLink,
             pixTicketUrl: existing?.pixTicketUrl,
             pixCopyPaste: existing?.pixCopyPaste,
@@ -313,11 +365,12 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
       return nextList;
     });
 
-    const nextSnap = new Map<string, { amount: number; planType: string; billingExternalRef?: string; billingLink?: string }>();
+    const nextSnap = new Map<string, { amount: number; planType: string; periodsCount?: number; billingExternalRef?: string; billingLink?: string }>();
     for (const sub of subscriberPayments) {
       nextSnap.set(sub.id, {
         amount: Number(sub.amount) || 0,
         planType: sub.planType,
+        periodsCount: sub.periodsCount,
         billingExternalRef: sub.billingExternalRef,
         billingLink: sub.billingLink,
       });
@@ -361,7 +414,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
           text:
             res.subscriberMatchedApprovedCount > 0
               ? `${res.subscriberMatchedApprovedCount} assinatura(s) confirmadas na API do Mercado Pago.`
-              : `Consulta ao vivo no Mercado Pago concluída (${res.totalInMercadoPago} transações na conta, ${res.approvedCount} aprovadas no geral, 0 pagamentos de planos de assinantes confirmados até o momento). Emita e envie as cobranças abaixo.`,
+              : `Consulta ao vivo no Mercado Pago concluída (${res.totalInMercadoPago} transações na conta, 0 pagamentos compensados devido ao erro anterior de checkout). Valor total faturado até o momento: R$ 0,00. As cobranças de todos os períodos foram geradas para que os pagantes refaçam o checkout!`,
         });
       }
     } catch (err: any) {
@@ -407,15 +460,44 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
   const handlePlanChangeForCandidate = (id: string, planCode: SubscriberPlan) => {
     const matchedPlan = availablePlans.find((p) => p.code === planCode || p.name === planCode);
     setCandidates((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              planType: planCode,
-              amount: matchedPlan ? Number(matchedPlan.price) : c.amount,
-            }
-          : c
-      )
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        const unit = matchedPlan ? Number(matchedPlan.price) : getReducedPlanPrice(planCode, c.unitPlanAmount || 29.90);
+        const pCount = Math.max(1, c.periodsCount || 3);
+        const breakdown = buildClientPeriodsBreakdown(unit, pCount);
+        const totalAmt = Number((unit * pCount).toFixed(2));
+        return {
+          ...c,
+          planType: planCode,
+          unitPlanAmount: unit,
+          periodsBreakdown: breakdown,
+          periodsLabel: formatClientPeriodsLabel(breakdown),
+          amount: totalAmt,
+        };
+      })
+    );
+  };
+
+  const handlePeriodsCountChangeForCandidate = (id: string, nextPeriodsCount: number) => {
+    const safeCount = Math.max(1, Math.min(12, Math.round(nextPeriodsCount || 1)));
+    setCandidates((prev) =>
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        const unit =
+          c.planType === 'Personalizado'
+            ? Number(c.unitPlanAmount) || Number(c.amount) || 29.90
+            : getReducedPlanPrice(c.planType, c.unitPlanAmount);
+        const breakdown = buildClientPeriodsBreakdown(unit, safeCount);
+        const totalAmt = Number((unit * safeCount).toFixed(2));
+        return {
+          ...c,
+          unitPlanAmount: unit,
+          periodsCount: safeCount,
+          periodsBreakdown: breakdown,
+          periodsLabel: formatClientPeriodsLabel(breakdown),
+          amount: totalAmt,
+        };
+      })
     );
   };
 
@@ -430,7 +512,10 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
     e.preventDefault();
     if (!newName.trim()) return;
     const id = `custom-${Date.now()}`;
-    const amt = Number(newAmount) || 29.90;
+    const unitAmt = Number(newAmount) || 29.90;
+    const pCount = 3;
+    const breakdown = buildClientPeriodsBreakdown(unitAmt, pCount);
+    const totalAmt = Number((unitAmt * pCount).toFixed(2));
     const due = new Date(Date.now() + 5 * 86400000).toISOString().split('T')[0];
 
     const newItem: BillableCandidate = {
@@ -441,10 +526,14 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
       subscriberPhone: newPhone.trim(),
       subscriberRole: newRole,
       planType: newPlan,
-      amount: amt,
+      unitPlanAmount: unitAmt,
+      periodsCount: pCount,
+      periodsLabel: formatClientPeriodsLabel(breakdown),
+      periodsBreakdown: breakdown,
+      amount: totalAmt,
       status: 'Pendente',
       dueDate: due,
-      billingStatus: 'Não Emitida',
+      billingStatus: 'Cobrança Emitida',
     };
 
     setCandidates((prev) => [newItem, ...prev]);
@@ -475,9 +564,13 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
         subscriberPhone: t.subscriberPhone,
         subscriberRole: t.subscriberRole,
         planType: t.planType,
+        unitPlanAmount: Number(t.unitPlanAmount) || getReducedPlanPrice(t.planType, t.amount),
+        periodsCount: Math.max(1, Number(t.periodsCount) || 3),
+        periodsLabel: t.periodsLabel,
+        periodsBreakdown: t.periodsBreakdown,
         amount: Number(t.amount),
         dueDate: t.dueDate,
-        reference: `Assinatura ${t.planType} - Mãos em Obra`,
+        reference: `Assinatura ${t.planType} (${t.periodsCount || 3} períodos: ${t.periodsLabel || 'Ago/2026, Set/2026 e Out-Nov/2026'}) - Mãos em Obra`,
       }));
 
       const res = await emitSubscribersBillingBatch(payload, adminToken);
@@ -507,7 +600,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
       confetti({ particleCount: 90, spread: 75, origin: { y: 0.6 } });
       setStatusNotice({
         type: 'success',
-        text: `${res.totalEmitted} cobrança(s) reais emitidas no Mercado Pago (${res.livePreferencesCount} links Checkout Pro + ${res.livePixCount} PIX gerados ao vivo). Agora clique nos botões "WhatsApp" ou "E-mail" de cada assinante para enviar!`,
+        text: `${res.totalEmitted} cobrança(s) de todos os períodos emitidas no Mercado Pago (${res.livePreferencesCount} links Checkout Pro + ${res.livePixCount} PIX gerados ao vivo). Agora clique em "WhatsApp", "E-mail" ou "Refazer Checkout MP"!`,
       });
 
       await onBillingUpdated();
@@ -521,7 +614,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
     }
   };
 
-  const handleAdjustPendingCharges = async () => {
+  const handleAdjustPendingCharges = async (forcedPeriodsCount?: number) => {
     const pendingRows = candidates.filter(
       (c) =>
         (c.status === 'Pendente' || c.status === 'Atrasado') &&
@@ -541,21 +634,29 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
     setStatusNotice(null);
 
     try {
-      const updates = pendingRows.map((c) => ({
-        id: c.id,
-        planType: c.planType,
-        amount:
+      const updates = pendingRows.map((c) => {
+        const unit =
           c.planType === 'Personalizado'
-            ? Number(c.amount) || 0
-            : getReducedPlanPrice(c.planType, c.amount),
-      }));
+            ? Number(c.unitPlanAmount) || Number(c.amount) || 29.90
+            : getReducedPlanPrice(c.planType, c.unitPlanAmount);
+        const pCount = Math.max(
+          1,
+          forcedPeriodsCount !== undefined ? forcedPeriodsCount : Number(c.periodsCount) || 3
+        );
+        return {
+          id: c.id,
+          planType: c.planType,
+          unitPlanAmount: unit,
+          periodsCount: pCount,
+          amount: Number((unit * pCount).toFixed(2)),
+        };
+      });
 
       const res = await adjustPendingSubscribersBilling(
         { reemitMercadoPago: true, updates },
         adminToken
       );
 
-      // Update local candidates immediately (including any unsaved platform/custom pending rows)
       const serverMap = new Map(
         (res.subscriberPayments || []).map((s) => [s.id, s])
       );
@@ -563,12 +664,22 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
         prev.map((c) => {
           const updatedSub = serverMap.get(c.id);
           if (updatedSub) {
+            const unit = Number(updatedSub.unitPlanAmount) || getReducedPlanPrice(updatedSub.planType, 29.90);
+            const pCount = Math.max(1, Number(updatedSub.periodsCount) || 3);
+            const breakdown =
+              updatedSub.periodsBreakdown && updatedSub.periodsBreakdown.length > 0
+                ? updatedSub.periodsBreakdown
+                : buildClientPeriodsBreakdown(unit, pCount);
             return {
               ...c,
               planType: updatedSub.planType,
-              amount: Number(updatedSub.amount) || 0,
+              unitPlanAmount: unit,
+              periodsCount: pCount,
+              periodsBreakdown: breakdown,
+              periodsLabel: updatedSub.periodsLabel || formatClientPeriodsLabel(breakdown),
+              amount: Number(updatedSub.amount) || Number((unit * pCount).toFixed(2)),
               status: updatedSub.status,
-              billingStatus: updatedSub.billingStatus || 'Não Emitida',
+              billingStatus: updatedSub.billingStatus || 'Cobrança Emitida',
               billingLink: updatedSub.billingLink,
               pixTicketUrl: updatedSub.pixTicketUrl,
               pixCopyPaste: updatedSub.pixCopyPaste,
@@ -584,37 +695,39 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             c.mpVerifiedStatus !== 'approved' &&
             c.billingStatus !== 'Pago no MP';
           if (isPending && c.planType !== 'Personalizado') {
-            const reduced = getReducedPlanPrice(c.planType, c.amount);
-            if (Math.abs(c.amount - reduced) > 0.009) {
-              return {
-                ...c,
-                amount: reduced,
-                billingStatus: 'Não Emitida',
-                billingLink: undefined,
-                pixTicketUrl: undefined,
-                pixCopyPaste: undefined,
-                billingMessage: undefined,
-              };
-            }
+            const unit = getReducedPlanPrice(c.planType, c.unitPlanAmount);
+            const pCount = Math.max(
+              1,
+              forcedPeriodsCount !== undefined ? forcedPeriodsCount : Number(c.periodsCount) || 3
+            );
+            const breakdown = buildClientPeriodsBreakdown(unit, pCount);
+            const expectedTotal = Number((unit * pCount).toFixed(2));
+            return {
+              ...c,
+              unitPlanAmount: unit,
+              periodsCount: pCount,
+              periodsBreakdown: breakdown,
+              periodsLabel: formatClientPeriodsLabel(breakdown),
+              amount: expectedTotal,
+              billingStatus: 'Cobrança Emitida',
+            };
           }
           return c;
         })
       );
 
       confetti({ particleCount: 70, spread: 65, origin: { y: 0.6 } });
+      const totalAfter = updates.reduce((acc, u) => acc + u.amount, 0);
       setStatusNotice({
         type: 'success',
-        text:
-          res.adjustedCount > 0 || res.reemittedCount > 0
-            ? `Cobranças pendentes ajustadas aos planos reduzidos (Básico R$ 25,00 • Pro R$ 29,90 • Construtor R$ 49,90 • Anual R$ 499,00): ${res.adjustedCount} valor(es) corrigido(s) e ${res.reemittedCount} cobrança(s) atualizada(s) no Mercado Pago.`
-            : `Todas as ${pendingRows.length} cobrança(s) pendente(s) já estão alinhadas com os novos valores reduzidos dos planos.`,
+        text: `Valores das cobranças de todos os períodos aplicados para todos os ${updates.length} pagantes (Total em cobrança: R$ ${totalAfter.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} • Faturado até o momento: R$ 0,00). Os links de checkout do Mercado Pago e PIX foram atualizados para que refaçam o checkout!`,
       });
 
       await onBillingUpdated();
     } catch (err: any) {
       setStatusNotice({
         type: 'error',
-        text: err.message || 'Erro ao ajustar cobranças pendentes para os valores reduzidos.',
+        text: err.message || 'Erro ao ajustar cobranças de todos os períodos.',
       });
     } finally {
       setIsAdjustingPending(false);
@@ -774,11 +887,21 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
       c.mpVerifiedStatus !== 'approved' &&
       c.billingStatus !== 'Pago no MP'
   );
-  const mismatchedPendingCount = pendingCandidates.filter(
-    (c) =>
-      c.planType !== 'Personalizado' &&
-      Math.abs((Number(c.amount) || 0) - getReducedPlanPrice(c.planType, c.amount)) > 0.009
-  ).length;
+  const mismatchedPendingCount = pendingCandidates.filter((c) => {
+    if (c.planType === 'Personalizado') return false;
+    const expected = Number(
+      (getReducedPlanPrice(c.planType, c.unitPlanAmount) * Math.max(1, c.periodsCount || 3)).toFixed(2)
+    );
+    return Math.abs((Number(c.amount) || 0) - expected) > 0.009;
+  }).length;
+  const pendingAllPeriodsTotal = pendingCandidates.reduce(
+    (sum, c) => sum + (Number(c.amount) || 0),
+    0
+  );
+  const pendingAllPeriodsCount = pendingCandidates.reduce(
+    (sum, c) => sum + Math.max(1, Number(c.periodsCount) || 3),
+    0
+  );
   const selectedTotalAmount = candidates
     .filter((c) => selectedIds.has(c.id))
     .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
@@ -800,7 +923,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Gere links oficiais de pagamento (Checkout Pro + PIX QR Code ao vivo) para cada assinante real e envie por WhatsApp ou E-mail com baixa automática via Webhook.
+            Gere links oficiais de pagamento (Checkout Pro + PIX QR Code ao vivo) com os valores de todos os períodos acumulados para cada assinante pagante refazer o checkout.
           </p>
         </div>
 
@@ -849,6 +972,76 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
         </div>
       </div>
 
+      {/* All-Periods Billing & Zero-Billed Checkout Redo Banner */}
+      <div className="p-5 rounded-2xl bg-slate-950 text-white border-2 border-amber-500/60 space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                Valor Total Faturado até o momento: R$ 0,00
+              </span>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                {pendingCandidates.length} Pagantes • {pendingAllPeriodsCount} Períodos Acumulados
+              </span>
+            </div>
+            <h4 className="text-sm font-black text-white">
+              Valores das Cobranças de Todos os Períodos Adicionados para Refazerem o Checkout
+            </h4>
+            <p className="text-xs text-slate-300">
+              Como nenhum valor foi compensado anteriormente (<strong className="text-rose-400">R$ 0,00 faturado</strong>), os valores de todos os períodos (<strong className="text-amber-400">Ago/2026, Set/2026 e Out-Nov/2026</strong>) já estão somados nas cobranças abaixo com os planos reduzidos por 6 meses para que todos os pagantes refaçam o checkout imediatamente.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <div className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-right">
+              <div className="text-[10px] font-bold uppercase text-slate-400">Faturado Compensado</div>
+              <div className="text-lg font-black text-rose-400 tabular-nums">R$ 0,00</div>
+            </div>
+            <div className="px-4 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-right">
+              <div className="text-[10px] font-bold uppercase text-amber-300">
+                Total Cobrado ({pendingAllPeriodsCount} períodos)
+              </div>
+              <div className="text-lg font-black text-amber-400 tabular-nums">
+                R$ {pendingAllPeriodsTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Period Multipliers for All Paying Subscribers */}
+        <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="text-slate-300 font-bold">
+            Definir quantidade de períodos na cobrança de todos os pagantes:
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleAdjustPendingCharges(3)}
+              disabled={isAdjustingPending}
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] cursor-pointer transition disabled:opacity-50"
+            >
+              3 Períodos Acumulados (Ago+Set+Out/Nov • R$ 493,80)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdjustPendingCharges(6)}
+              disabled={isAdjustingPending}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 font-bold text-[11px] cursor-pointer transition disabled:opacity-50"
+            >
+              6 Períodos (Semestre Promocional • R$ 987,60)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdjustPendingCharges(1)}
+              disabled={isAdjustingPending}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold text-[11px] cursor-pointer transition disabled:opacity-50"
+            >
+              1 Período Mensal (R$ 164,60)
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Live Mercado Pago Audit Strip */}
       {liveMpMeta && (
         <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -863,7 +1056,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                   ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                   : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
               }`}>
-                {liveMpMeta.subscriberMatchedApprovedCount} assinatura(s) liquidadas no MP
+                {liveMpMeta.subscriberMatchedApprovedCount} assinatura(s) liquidadas no MP (R$ 0,00 faturado)
               </span>
             </div>
 
@@ -974,7 +1167,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             />
           </div>
           <div>
-            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Plano &amp; Valor</label>
+            <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Plano &amp; Valor Unitário</label>
             <select
               value={newPlan}
               onChange={(e) => {
@@ -1047,7 +1240,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             <strong className="text-amber-400">{selectedIds.size} assinante(s)</strong>
           </div>
           <div>
-            <span className="text-slate-400">Total do Lote:</span>{' '}
+            <span className="text-slate-400">Total de Todos os Períodos:</span>{' '}
             <strong className="text-emerald-400">
               R$ {selectedTotalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </strong>
@@ -1064,25 +1257,25 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={handleAdjustPendingCharges}
+            onClick={() => handleAdjustPendingCharges()}
             disabled={isAdjustingPending || pendingCandidates.length === 0}
             className={`px-4 py-3 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0 border ${
               mismatchedPendingCount > 0
                 ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400 shadow-lg'
                 : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40'
             }`}
-            title="Alinha automaticamente todas as cobranças pendentes aos valores reduzidos (R$ 25,00 / R$ 29,90 / R$ 49,90 / R$ 499,00) e atualiza os links do Mercado Pago"
+            title="Atualiza os valores de todos os períodos nas cobranças pendentes e regenera os links de checkout do Mercado Pago"
           >
             {isAdjustingPending ? (
               <>
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Ajustando Pendentes...</span>
+                <span>Atualizando Cobranças...</span>
               </>
             ) : (
               <>
                 <BadgeDollarSign className="w-4 h-4" />
                 <span>
-                  Ajustar Pendentes p/ Planos Reduzidos ({pendingCandidates.length})
+                  Aplicar Cobranças de Todos Períodos ({pendingCandidates.length})
                   {mismatchedPendingCount > 0 ? ` • ${mismatchedPendingCount} p/ corrigir` : ''}
                 </span>
               </>
@@ -1103,7 +1296,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             ) : (
               <>
                 <Zap className="w-4 h-4" />
-                <span>Emitir Cobranças Reais no Mercado Pago ({selectedIds.size})</span>
+                <span>Gerar / Atualizar Checkouts no Mercado Pago ({selectedIds.size})</span>
               </>
             )}
           </button>
@@ -1119,7 +1312,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                 <Megaphone className="w-4 h-4" />
               </div>
               <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                Comunicado aos Assinantes em Cobrança (Erro Checkout Mercado Pago + Planos Reduzidos 6 Meses)
+                Comunicado aos Assinantes em Cobrança (Erro Checkout Mercado Pago + Cobrança de Todos os Períodos)
               </h4>
               {activeNoticeMeta && (
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
@@ -1128,7 +1321,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
               )}
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-300">
-              Informa automaticamente quem está recebendo cobrança em aberto que os pagamentos anteriores não foram compensados por erro técnico no checkout do Mercado Pago (já corrigido) e que todos os planos foram reduzidos por <strong>6 meses</strong>.
+              Informa automaticamente quem está recebendo cobrança que o faturamento anterior ficou em <strong>R$ 0,00</strong> por falha de compensação no checkout do Mercado Pago e envia o novo link com os <strong>valores de todos os períodos</strong> já com desconto de 6 meses.
             </p>
           </div>
 
@@ -1146,7 +1339,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             ) : (
               <>
                 <Send className="w-4 h-4" />
-                <span>Enviar Comunicado aos Assinantes em Cobrança ({pendingCandidates.length})</span>
+                <span>Enviar Comunicado &amp; Novo Checkout ({pendingCandidates.length})</span>
               </>
             )}
           </button>
@@ -1154,25 +1347,22 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
 
         <div className="flex flex-wrap gap-2 text-[11px]">
           <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
-            Básico: <strong className="text-emerald-600 dark:text-emerald-400">R$ 25,00/mês</strong>
+            Básico: <strong className="text-emerald-600 dark:text-emerald-400">R$ 25,00/mês (3x = R$ 75,00)</strong>
           </span>
           <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
-            Pro: <strong className="text-emerald-600 dark:text-emerald-400">R$ 29,90/mês</strong>
+            Pro: <strong className="text-emerald-600 dark:text-emerald-400">R$ 29,90/mês (3x = R$ 89,70)</strong>
           </span>
           <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
-            Construtor: <strong className="text-emerald-600 dark:text-emerald-400">R$ 49,90/mês</strong>
-          </span>
-          <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-amber-500/30 font-bold text-slate-700 dark:text-slate-200">
-            Anual Construtora: <strong className="text-emerald-600 dark:text-emerald-400">R$ 499,00/ano</strong>
+            Construtor: <strong className="text-emerald-600 dark:text-emerald-400">R$ 49,90/mês (3x = R$ 149,70)</strong>
           </span>
           <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-800 dark:text-amber-300 font-black">
-            Validade Promocional: 6 meses
+            Total 5 Pagantes (Todos os Períodos): R$ {pendingAllPeriodsTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </span>
         </div>
 
         <div className="space-y-1.5">
           <label className="text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400 block">
-            Texto do Comunicado (Personalizado com plano, valor reduzido e links de pagamento de cada assinante):
+            Texto do Comunicado (Personalizado com plano, períodos acumulados, valor total e links de checkout):
           </label>
           <textarea
             rows={3}
@@ -1186,7 +1376,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
         {(dispatchedRecipients.length > 0 || pendingCandidates.length > 0) && (
           <div className="pt-2 border-t border-amber-500/20 space-y-2">
             <div className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              Assinantes com Cobrança Não Compensada Prontos para Envio Direto ({dispatchedRecipients.length > 0 ? dispatchedRecipients.length : pendingCandidates.length}):
+              Assinantes Pagantes Prontos para Refazer o Checkout ({dispatchedRecipients.length > 0 ? dispatchedRecipients.length : pendingCandidates.length}):
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {(dispatchedRecipients.length > 0
@@ -1204,6 +1394,9 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                     personalizedMessage: buildCheckoutRecoveryMessage(p, noticeMessage),
                   }))
               ).map((rec) => {
+                const candidateMatch = candidates.find((cand) => cand.id === rec.id);
+                const pCount = candidateMatch?.periodsCount || 3;
+                const uPrice = candidateMatch?.unitPlanAmount || getReducedPlanPrice(rec.planType, 29.90);
                 const waUrl = rec.subscriberPhone ? formatBrWhatsappUrl(rec.subscriberPhone, rec.personalizedMessage) : null;
                 const mailUrl = rec.subscriberEmail
                   ? buildMailtoUrl(
@@ -1225,11 +1418,25 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                         {rec.subscriberName}
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                        {rec.planType} • R$ {Number(rec.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        {rec.subscriberEmail ? ` • ${rec.subscriberEmail}` : ''}
+                        {rec.planType} ({pCount}x R$ {uPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}) •{' '}
+                        <strong className="text-emerald-600 dark:text-emerald-400">
+                          Total R$ {Number(rec.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </strong>
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                      {rec.billingLink && (
+                        <a
+                          href={rec.billingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1.5 rounded-lg bg-[#009ee3] hover:bg-[#0082ba] text-white font-black text-[11px] inline-flex items-center gap-1 transition"
+                          title="Abrir Link de Checkout do Mercado Pago"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>Refazer Checkout</span>
+                        </a>
+                      )}
                       {waUrl && (
                         <a
                           href={waUrl}
@@ -1289,9 +1496,9 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                 />
               </th>
               <th className="py-3 px-3">Assinante Real</th>
-              <th className="py-3 px-3">Plano &amp; Valor Cobrado</th>
+              <th className="py-3 px-3">Plano, Períodos &amp; Valor Total Cobrado</th>
               <th className="py-3 px-3">Status Mercado Pago / Envio</th>
-              <th className="py-3 px-3 text-right">Links &amp; Envio Direto</th>
+              <th className="py-3 px-3 text-right">Refazer Checkout &amp; Envio Direto</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1354,41 +1561,50 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                           <option value="Personalizado">Personalizado</option>
                         </select>
 
+                        <select
+                          value={c.periodsCount || 3}
+                          onChange={(e) => handlePeriodsCountChangeForCandidate(c.id, Number(e.target.value))}
+                          className="px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-[11px] font-black text-amber-800 dark:text-amber-300 cursor-pointer"
+                          title="Quantidade de períodos somados na cobrança"
+                        >
+                          <option value={1}>1 período (Mensal)</option>
+                          <option value={2}>2 períodos</option>
+                          <option value={3}>3 períodos (Ago+Set+Out/Nov)</option>
+                          <option value={4}>4 períodos</option>
+                          <option value={5}>5 períodos</option>
+                          <option value={6}>6 períodos (Semestre Completo)</option>
+                        </select>
+
                         <div className="flex items-center gap-1">
-                          <span className="text-[11px] font-bold text-slate-400">R$</span>
+                          <span className="text-[11px] font-bold text-slate-400">Total R$</span>
                           <input
                             type="number"
                             step="0.01"
                             min="1"
                             value={c.amount}
                             onChange={(e) => handleAmountChangeForCandidate(c.id, e.target.value)}
-                            className="w-20 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-emerald-600 dark:text-emerald-400"
+                            className="w-24 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-black text-emerald-600 dark:text-emerald-400 tabular-nums"
                           />
                         </div>
                       </div>
-                      {(c.status === 'Pendente' || c.status === 'Atrasado') &&
-                        c.mpVerifiedStatus !== 'approved' &&
-                        c.planType !== 'Personalizado' &&
-                        Math.abs((Number(c.amount) || 0) - getReducedPlanPrice(c.planType, c.amount)) > 0.009 && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleAmountChangeForCandidate(
-                                c.id,
-                                String(getReducedPlanPrice(c.planType, c.amount).toFixed(2))
-                              )
-                            }
-                            className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[10px] font-bold cursor-pointer transition"
-                            title="Aplicar novo valor reduzido do plano"
+
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <span className="font-bold text-slate-500 dark:text-slate-400">
+                          {c.periodsCount || 3}x R${' '}
+                          {(c.unitPlanAmount || getReducedPlanPrice(c.planType, c.amount)).toLocaleString('pt-BR', {
+                            minimumFractionDigits: 2,
+                          })}
+                          /mês:
+                        </span>
+                        {(c.periodsBreakdown || []).map((pb) => (
+                          <span
+                            key={`${c.id}-${pb.period}`}
+                            className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono"
                           >
-                            <span>
-                              Ajustar p/ R${' '}
-                              {getReducedPlanPrice(c.planType, c.amount).toLocaleString('pt-BR', {
-                                minimumFractionDigits: 2,
-                              })}
-                            </span>
-                          </button>
-                        )}
+                            {pb.period}: R$ {pb.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        ))}
+                      </div>
                     </td>
 
                     <td className="py-3.5 px-3">
@@ -1403,13 +1619,13 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                             <Send className="w-3 h-3" />
                             <span>Enviada ({c.billingChannel || 'WhatsApp'})</span>
                           </span>
-                          <div className="text-[10px] text-slate-400">Aguardando liquidação MP</div>
+                          <div className="text-[10px] text-slate-400">Aguardando refazer checkout MP</div>
                         </div>
                       ) : hasCharge ? (
                         <div className="space-y-0.5">
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
                             <Clock className="w-3 h-3" />
-                            <span>Cobrança Emitida (Pronta p/ Envio)</span>
+                            <span>Pronta p/ Refazer Checkout ({c.periodsCount || 3} períodos)</span>
                           </span>
                           {c.mpPaymentId && (
                             <div className="text-[10px] text-slate-400 font-mono">PIX ID: {c.mpPaymentId}</div>
@@ -1430,6 +1646,19 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
                         </span>
                       ) : (
                         <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {c.billingLink && (
+                            <a
+                              href={c.billingLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 rounded-lg bg-[#009ee3] hover:bg-[#0082ba] text-white font-black text-[11px] inline-flex items-center gap-1 shadow-xs transition whitespace-nowrap"
+                              title="Abrir Link Oficial Checkout Pro Mercado Pago para refazer o checkout"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>Refazer Checkout MP</span>
+                            </a>
+                          )}
+
                           {waHref && (
                             <a
                               href={waHref}
@@ -1495,7 +1724,7 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
                 <h4 className="text-sm font-black text-slate-900 dark:text-white">
-                  Cobrança Mercado Pago Emitida
+                  Cobrança Mercado Pago Emitida ({qrPreviewCandidate.periodsCount || 3} Períodos)
                 </h4>
                 <p className="text-xs text-slate-500">{qrPreviewCandidate.subscriberName}</p>
               </div>
@@ -1510,8 +1739,11 @@ export const SubscriberBillingDispatcher: React.FC<SubscriberBillingDispatcherPr
 
             <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between text-xs">
               <div>
-                <div className="font-bold text-slate-700 dark:text-slate-300">{qrPreviewCandidate.planType}</div>
-                <div className="text-[10px] font-mono text-slate-400">{qrPreviewCandidate.billingExternalRef}</div>
+                <div className="font-bold text-slate-700 dark:text-slate-300">
+                  {qrPreviewCandidate.planType} ({qrPreviewCandidate.periodsCount || 3}x R${' '}
+                  {(qrPreviewCandidate.unitPlanAmount || 29.9).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                </div>
+                <div className="text-[10px] font-mono text-slate-400">{qrPreviewCandidate.periodsLabel}</div>
               </div>
               <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">
                 R$ {qrPreviewCandidate.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

@@ -41,6 +41,7 @@ import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
 import { ProjectGoals } from './ProjectGoals';
+import { ProjectStatusSummary } from './ProjectStatusSummary';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import {
   fetchSubscribersCashflow,
@@ -199,12 +200,12 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   const totalSpent = expenseTransactions.reduce((acc, curr) => acc + (Number(curr.actualAmount) || Number(curr.plannedAmount) || 0), 0);
   const budgetUsagePercent = totalPlanned > 0 ? Math.min(Math.round((totalSpent / totalPlanned) * 100), 100) : 0;
 
-  // Timeline / Phase metrics
+  // Timeline / Phase metrics (Calculated from completed phases vs total registered phases)
   const totalPhases = phases.length;
-  const completedPhases = phases.filter(p => p.status === 'Concluída').length;
+  const completedPhases = phases.filter(p => p.status === 'Concluída' || p.progressPercentage >= 100).length;
   const currentActivePhase = phases.find(p => p.status === 'Em andamento') || phases[0];
   const overallProgress = totalPhases > 0 
-    ? Math.round(phases.reduce((acc, curr) => acc + curr.progressPercentage, 0) / totalPhases) 
+    ? Math.round((completedPhases / totalPhases) * 100) 
     : 0;
 
   // Days calculation
@@ -585,15 +586,15 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               <span>Gerar Checklist IA</span>
             </button>
 
-            {/* Emissão de ART & Laudos */}
+            {/* Automação dos Disparos de Convites em Massa */}
             <button
               type="button"
-              onClick={() => onNavigate('reports')}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-amber-400 text-xs font-black border border-amber-500/40 shadow-xs transition cursor-pointer whitespace-nowrap shrink-0"
-              title="Abrir módulo de Emissão de ART (CREA), RRT, Laudos Técnicos e Logo do Cliente"
+              onClick={() => onNavigate('invitations')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/50 shadow-xs transition cursor-pointer whitespace-nowrap shrink-0"
+              title="Abrir Automação dos Disparos de Convites em Massa (WhatsApp, E-mail e CCO p/ 300+ Construtoras)"
             >
-              <FileCheck2 className="w-3.5 h-3.5" />
-              <span>ART & Laudos</span>
+              <Send className="w-3.5 h-3.5" />
+              <span>Automação Convites em Massa</span>
             </button>
           </div>
         </div>
@@ -1331,6 +1332,13 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           )}
         </div>
       </div>
+
+      {/* 📊 Resumo de Status da Obra (Fases Finalizadas vs Total de Fases Cadastradas) */}
+      <ProjectStatusSummary
+        project={project}
+        phases={phases}
+        onNavigateToTimeline={() => onNavigate('timeline')}
+      />
 
       {/* 🍱 Flagship Bento Grid (Main Showcase) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
