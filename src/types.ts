@@ -825,4 +825,16 @@ export interface DdsRecord {
   createdAt: string;
 }
 
+export interface ProjectGalleryPhoto {
+  id: string;
+  projectId: string;
+  url: string;
+  caption: string;
+  folder: 'Fachada' | 'Estrutura' | 'Acabamento' | 'Instalações' | 'Segurança' | 'Geral';
+  linkedToType?: 'RDO' | 'Laudo Técnico' | 'ART' | 'Nenhum';
+  linkedToName?: string;
+  capturedAt: string;
+}
+
+
 

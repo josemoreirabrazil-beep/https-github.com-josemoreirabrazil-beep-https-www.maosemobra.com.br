@@ -1,4 +1,4 @@
-import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProposalQuote, ConstructionOpportunity, ServiceProviderProfile, CorporateContact, TechnicalDocument, WorkPermit, DdsRecord } from '../types';
+import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProposalQuote, ConstructionOpportunity, ServiceProviderProfile, CorporateContact, TechnicalDocument, WorkPermit, DdsRecord, ProjectGalleryPhoto } from '../types';
 import { INITIAL_CORPORATE_CONTACTS } from '../data/corporateContacts';
 
 const STORAGE_KEYS = {
@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   TECH_DOCS: 'maos_em_obra_technical_documents_v1',
   WORK_PERMITS: 'maos_em_obra_work_permits_v1',
   DDS_RECORDS: 'maos_em_obra_dds_records_v1',
+  GALLERY_PHOTOS: 'maos_em_obra_gallery_photos_v1',
 };
 
 export const INITIAL_SERVICE_REQUESTS: ServiceRequest[] = [];
@@ -950,6 +951,36 @@ export function saveDdsRecords(projectIdOrRecords: string | DdsRecord[], maybeRe
     }
   } catch (e) {
     console.error('Failed to save DDS records:', e);
+  }
+}
+
+export function loadGalleryPhotos(projectId?: string): ProjectGalleryPhoto[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.GALLERY_PHOTOS);
+    const all: ProjectGalleryPhoto[] = raw ? JSON.parse(raw) : [];
+    if (projectId) {
+      return all.filter(p => p.projectId === projectId);
+    }
+    return all;
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveGalleryPhotos(projectIdOrPhotos: string | ProjectGalleryPhoto[], maybePhotos?: ProjectGalleryPhoto[]): void {
+  try {
+    if (typeof projectIdOrPhotos === 'string') {
+      const projectId = projectIdOrPhotos;
+      const photosToSave = maybePhotos || [];
+      const raw = localStorage.getItem(STORAGE_KEYS.GALLERY_PHOTOS);
+      const all: ProjectGalleryPhoto[] = raw ? JSON.parse(raw) : [];
+      const other = all.filter(p => p.projectId !== projectId);
+      localStorage.setItem(STORAGE_KEYS.GALLERY_PHOTOS, JSON.stringify([...photosToSave, ...other]));
+    } else {
+      localStorage.setItem(STORAGE_KEYS.GALLERY_PHOTOS, JSON.stringify(projectIdOrPhotos));
+    }
+  } catch (e) {
+    console.error('Failed to save gallery photos:', e);
   }
 }
 

@@ -16,6 +16,7 @@ import {
 import type { Project, DailyLog, Expense } from '../types';
 import type { NotificationSettingsConfig, WeekdayCode } from '../services/firebaseMessaging';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { PushNotificationManager } from './PushNotificationManager';
 import confetti from 'canvas-confetti';
 
 interface NotificationSettingsViewProps {
@@ -183,6 +184,11 @@ export const NotificationSettingsView: React.FC<NotificationSettingsViewProps> =
 
   return (
     <div className="space-y-6 pb-12 animate-fade-in">
+      {/* 🚀 Push Notification Manager Component */}
+      <PushNotificationManager
+        projectTitle={currentProject.title}
+        onNavigateToRdo={onNavigateToRdo}
+      />
       {/* ======================================================== */}
       {/* 🔔 BANNER PRINCIPAL: CONFIGURAÇÕES DE NOTIFICAÇÕES PUSH */}
       {/* ======================================================== */}
