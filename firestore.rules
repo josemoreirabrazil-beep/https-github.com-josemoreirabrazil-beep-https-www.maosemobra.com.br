@@ -1,0 +1,229 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Deny all access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Global Security Primitives
+    // =========================================================================
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Admin Master Global Check:
+    // Verifies email_verified == true for the bootstrapped Master email OR trusted /admins/{uid} document
+    function isAdmin() {
+      return isVerifiedEmail() && (
+        request.auth.token.email == 'josemoreirabrazil@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(ownerUid) {
+      return isVerifiedEmail() && request.auth.uid == ownerUid;
+    }
+
+    // =========================================================================
+    // Validation Blueprints
+    // =========================================================================
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'email', 'role', 'createdAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 160
+        && data.role in ['admin_master', 'SUPER_ADMIN_MASTER_GLOBAL']
+        && data.createdAt is timestamp;
+    }
+
+    function isValidFinancialSummary(data) {
+      return data.keys().hasAll(['totalCollected', 'availableBalance', 'pendingAmount', 'currency', 'updatedBy', 'updatedAt'])
+        && data.keys().hasOnly(['totalCollected', 'availableBalance', 'pendingAmount', 'currency', 'updatedBy', 'updatedAt'])
+        && data.totalCollected is number && data.totalCollected >= 0
+        && data.availableBalance is number && data.availableBalance >= 0
+        && data.pendingAmount is number && data.pendingAmount >= 0
+        && data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 10
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128
+        && data.updatedAt == request.time;
+    }
+
+    function isValidWithdrawalRecord(data) {
+      return data.keys().hasAll(['transferId', 'amount', 'pixKey', 'destination', 'status', 'requestedBy', 'createdAt'])
+        && data.keys().hasOnly(['transferId', 'amount', 'pixKey', 'destination', 'status', 'requestedBy', 'createdAt'])
+        && isValidId(data.transferId)
+        && data.amount is number && data.amount > 0
+        && data.pixKey is string && data.pixKey.size() >= 5 && data.pixKey.size() <= 64
+        && data.destination is string && data.destination.size() >= 2 && data.destination.size() <= 120
+        && data.status in ['pending', 'approved_pix_payout', 'failed', 'cancelled']
+        && data.requestedBy == request.auth.uid
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSubscriberPayment(data) {
+      return data.keys().hasAll(['subscriberEmail', 'planCode', 'amount', 'status', 'createdBy', 'createdAt'])
+        && data.keys().hasOnly(['subscriberEmail', 'planCode', 'amount', 'status', 'createdBy', 'createdAt'])
+        && data.subscriberEmail is string && data.subscriberEmail.size() >= 5 && data.subscriberEmail.size() <= 160
+        && data.planCode is string && data.planCode.size() >= 1 && data.planCode.size() <= 64
+        && data.amount is number && data.amount >= 0
+        && data.status in ['Pendente', 'Aprovado', 'Atrasado', 'Isento / Cortesia', 'Cancelado']
+        && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidBalanceAuditLog(data) {
+      return data.keys().hasAll(['eventType', 'actorUid', 'authorized', 'details', 'createdAt'])
+        && data.keys().hasOnly(['eventType', 'actorUid', 'actorEmail', 'authorized', 'details', 'createdAt'])
+        && data.eventType is string && data.eventType.size() >= 1 && data.eventType.size() <= 64
+        && data.actorUid is string && data.actorUid.size() >= 1 && data.actorUid.size() <= 128
+        && (!('actorEmail' in data) || (data.actorEmail is string && data.actorEmail.size() <= 160))
+        && data.authorized is bool
+        && data.details is string && data.details.size() >= 1 && data.details.size() <= 500
+        && data.createdAt == request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'planTier', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'planTier', 'createdAt', 'updatedAt'])
+        && data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 160
+        && data.planTier in ['free', 'subscriber_paid', 'subscriber_pro']
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidProject(data) {
+      return data.keys().hasAll(['ownerId', 'title', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'title', 'status', 'createdAt', 'updatedAt'])
+        && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.status in ['Em andamento', 'Planejamento', 'Concluída', 'Pausada']
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    // =========================================================================
+    // 1. Admin Master RBAC Registry (Exclusivo Admin Master)
+    // =========================================================================
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(adminId) && isAdmin() && isValidAdminUser(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(adminId) && isAdmin() && isValidAdminUser(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(adminId) && isAdmin();
+    }
+
+    // =========================================================================
+    // 2. Coleções Financeiras, Faturamento, Saldo e Repasses/Saques
+    //    Bloqueio total de leitura e escrita para público e usuários comuns
+    // =========================================================================
+    match /financial_summary/{docId} {
+      allow get: if isValidId(docId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(docId) && isAdmin() && isValidFinancialSummary(incoming());
+      allow update: if isValidId(docId) && isAdmin() && isValidFinancialSummary(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['totalCollected', 'availableBalance', 'pendingAmount', 'currency', 'updatedBy', 'updatedAt']);
+      allow delete: if isValidId(docId) && isAdmin();
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow get: if isValidId(withdrawalId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(withdrawalId) && isAdmin() && isValidWithdrawalRecord(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(withdrawalId) && isAdmin() && isValidWithdrawalRecord(incoming())
+        && existing().status == 'pending'
+        && incoming().createdAt == existing().createdAt
+        && incoming().requestedBy == existing().requestedBy
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow delete: if isValidId(withdrawalId) && isAdmin();
+    }
+
+    match /transfers/{transferId} {
+      allow get: if isValidId(transferId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(transferId) && isAdmin() && isValidWithdrawalRecord(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(transferId) && isAdmin() && isValidWithdrawalRecord(incoming())
+        && existing().status == 'pending'
+        && incoming().createdAt == existing().createdAt
+        && incoming().requestedBy == existing().requestedBy
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow delete: if isValidId(transferId) && isAdmin();
+    }
+
+    match /subscriber_payments/{paymentId} {
+      allow get: if isValidId(paymentId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(paymentId) && isAdmin() && isValidSubscriberPayment(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(paymentId) && isAdmin() && isValidSubscriberPayment(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().createdBy == existing().createdBy
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'amount', 'planCode']);
+      allow delete: if isValidId(paymentId) && isAdmin();
+    }
+
+    match /balance_audit_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(logId) && isAdmin() && isValidBalanceAuditLog(incoming());
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // 3. Perfis de Usuários (PII Isolada — Somente Próprio Usuário ou Admin)
+    // =========================================================================
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isVerifiedEmail() && existing().uid == request.auth.uid);
+      allow create: if isValidId(userId) && isOwner(userId) && isValidUserProfile(incoming())
+        && incoming().planTier == 'free'
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(userId) && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // =========================================================================
+    // 4. Projetos de Obra (Somente Proprietário ou Admin Master)
+    // =========================================================================
+    match /projects/{projectId} {
+      allow get: if isValidId(projectId) && (isAdmin() || isOwner(existing().ownerId));
+      allow list: if isAdmin() || (isVerifiedEmail() && existing().ownerId == request.auth.uid);
+      allow create: if isValidId(projectId) && isVerifiedEmail() && isValidProject(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(projectId) && isValidProject(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && (
+          isAdmin() ||
+          (isOwner(existing().ownerId) && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'status', 'updatedAt']))
+        );
+      allow delete: if isValidId(projectId) && (isAdmin() || isOwner(existing().ownerId));
+    }
+  }
+}

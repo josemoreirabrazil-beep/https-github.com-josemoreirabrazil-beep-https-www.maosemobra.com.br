@@ -48,7 +48,7 @@ import {
   saveTechnicalDocuments
 } from './services/storage';
 import { subscribeToAuthChanges, googleSignIn, getCachedGoogleToken } from './services/firebaseAuth';
-import { getCachedAdminSession, clearAdminSession } from './services/adminAuth';
+import { getCachedAdminSession, clearAdminSession, isAdminMasterAccount, MASTER_CREDENTIALS } from './services/adminAuth';
 import {
   getActiveUserSubscription,
   setActiveUserSubscription,
@@ -64,6 +64,7 @@ import {
 } from './services/subscriberBilling';
 import { usePushNotifications } from './hooks/usePushNotifications';
 import { logBalanceAccessEvent } from './services/balanceAudit';
+import { checkAndNotifyAdminRevenueMilestones, fetchRevenueMilestones } from './services/revenueMilestones';
 import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser, ProjectGoal, TechnicalDocument } from './types';
 import confetti from 'canvas-confetti';
 
@@ -151,7 +152,8 @@ export default function App() {
   });
 
   const isFirebaseSignedIn = Boolean(user);
-  const isAdminAuthenticated = Boolean(adminUser);
+  const isAdminMaster = isAdminMasterAccount(adminUser, user);
+  const isAdminAuthenticated = isAdminMaster;
   const isUserAuthenticated = isFirebaseSignedIn || isAdminAuthenticated;
   const isPaidSubscriber = hasPaidServiceAccess(activeSubscription);
   const isProSubscriber = hasProLaudoAccess(activeSubscription);
@@ -246,21 +248,31 @@ export default function App() {
     };
   }, [isAuthResolved, user?.email, adminUser?.token]);
 
-  // Carrega o saldo real da plataforma apenas quando Admin Master Global estiver autenticado
+  // Carrega o saldo real e avalia metas de faturamento apenas quando Admin Master Global estiver autenticado
   useEffect(() => {
-    if (!isAdminAuthenticated) return;
+    if (!isAdminMaster) return;
     let cancelled = false;
     fetchSubscribersCashflow()
-      .then((res) => {
-        if (!cancelled && res?.summary?.totalCollected && res.summary.totalCollected > 0) {
-          setAdminWithdrawalAmount(res.summary.totalCollected);
+      .then(async (res) => {
+        if (cancelled) return;
+        const collected = res?.summary?.totalCollected || 0;
+        if (collected > 0) {
+          setAdminWithdrawalAmount(collected);
         }
+        const milestoneState = await fetchRevenueMilestones(true);
+        if (cancelled) return;
+        await checkAndNotifyAdminRevenueMilestones({
+          isAdminMaster: true,
+          currentRevenue: collected,
+          milestones: milestoneState.milestones,
+          actorEmail: adminUser?.email || user?.email || undefined,
+        });
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [isAdminAuthenticated, activeTab]);
+  }, [isAdminMaster, activeTab, adminUser?.email, user?.email]);
 
   // 🚀 Firebase Cloud Messaging Push Notifications Hook
   const { requestPermission, latestNotification } = usePushNotifications();
@@ -272,9 +284,12 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
-  // Display banner when FCM notification arrives
+  // Display banner when FCM notification arrives (adminOnly notifications are strictly gated to isAdminMaster)
   useEffect(() => {
     if (latestNotification) {
+      if (latestNotification.data?.adminOnly === 'true' && !isAdminMaster) {
+        return;
+      }
       setWebhookNotification({
         success: true,
         message: `${latestNotification.title}: ${latestNotification.body}`,
@@ -283,7 +298,7 @@ export default function App() {
       const timer = setTimeout(() => setWebhookNotification(null), 10000);
       return () => clearTimeout(timer);
     }
-  }, [latestNotification]);
+  }, [latestNotification, isAdminMaster]);
 
   // When project changes, refresh the data collections
   useEffect(() => {
@@ -434,7 +449,7 @@ export default function App() {
   };
 
   const openWithdrawalModalWithAudit = (source: string) => {
-    if (!isAdminAuthenticated || !adminUser) {
+    if (!isAdminMaster) {
       logBalanceAccessEvent({
         type: 'BALANCE_ACCESS_DENIED',
         severity: 'CRITICAL',
@@ -448,16 +463,19 @@ export default function App() {
       return;
     }
 
+    const actorEmail = adminUser?.email || user?.email || MASTER_CREDENTIALS.email;
+    const actorName = adminUser?.name || user?.displayName || MASTER_CREDENTIALS.name;
+
     logBalanceAccessEvent({
       type: 'BALANCE_ACCESS_VIEW',
       severity: 'INFO',
       action: 'OPEN_WITHDRAWAL_MODAL',
       resource: `ValorRealDisponivelModal (${source})`,
-      details: `Admin Master (${adminUser.email}) consultou o valor real disponível em conta via ${source} (Valor: R$ ${adminWithdrawalAmount.toFixed(2)}).`,
+      details: `Admin Master (${actorEmail}) consultou o valor real disponível em conta via ${source} (Valor: R$ ${adminWithdrawalAmount.toFixed(2)}).`,
       authorized: true,
       amountInvolved: adminWithdrawalAmount,
-      actorEmail: adminUser.email,
-      actorName: adminUser.name,
+      actorEmail,
+      actorName,
       actorRole: 'ADMIN_MASTER',
     });
     setIsWithdrawalModalOpen(true);
@@ -980,7 +998,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'admin' && adminUser && (
+        {activeTab === 'admin' && adminUser && isAdminMaster && (
           <AdminMasterView
             adminUser={adminUser}
             onLogout={handleAdminLogout}
@@ -1162,12 +1180,12 @@ export default function App() {
         initialData={currentProject}
       />
 
-      {/* Modal Oficial de Saque p/ Mercado Pago — Exclusivo Admin Master Global */}
-      {isAdminAuthenticated && (
+      {/* Modal Oficial de Valor Real Disponível em Conta p/ Mercado Pago — Exclusivo Admin Master Global */}
+      {isAdminMaster && (
         <WithdrawalModal
           isOpen={isWithdrawalModalOpen}
           onClose={() => setIsWithdrawalModalOpen(false)}
-          isAdminAuthenticated={isAdminAuthenticated}
+          isAdminAuthenticated={isAdminMaster}
           availableAmount={adminWithdrawalAmount}
           onSuccess={(withdrawnAmount) => {
             setAdminWithdrawalAmount((prev) => Math.max(0, Number((prev - withdrawnAmount).toFixed(2))));

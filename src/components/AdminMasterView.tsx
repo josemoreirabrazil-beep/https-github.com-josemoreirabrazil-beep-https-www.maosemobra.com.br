@@ -78,7 +78,8 @@ import {
   fetchAuditLogs, 
   toggleSystemShield, 
   clearAdminSession, 
-  MASTER_CREDENTIALS 
+  MASTER_CREDENTIALS,
+  isAdminMasterAccount
 } from '../services/adminAuth';
 import {
   fetchSubscribersCashflow,
@@ -846,6 +847,11 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
     link.click();
     link.remove();
   };
+
+  const isAdminMaster = isAdminMasterAccount(adminUser, null);
+  if (!isAdminMaster) {
+    return null;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">

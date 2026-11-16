@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Bell, BellRing, Check, X, ShieldCheck, Zap } from 'lucide-react';
 import { requestPushNotificationPermission, simulatePushNotification, onForegroundMessage } from '../services/firebaseMessaging';
 import { fetchActiveSubscriberNotices } from '../services/subscriberBilling';
+import { fetchRevenueMilestones, REVENUE_MILESTONES_EVENT, type AdminMilestoneNotification } from '../services/revenueMilestones';
 import confetti from 'canvas-confetti';
 
 interface PushNotificationCenterProps {
@@ -45,12 +46,50 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({
 
   useEffect(() => {
     setNotificationsHistory((prev) => {
-      const withoutAdminNotif = prev.filter((item) => item.id !== ADMIN_WITHDRAWAL_NOTIF.id);
+      const withoutAdminItems = prev.filter(
+        (item) => item.id !== ADMIN_WITHDRAWAL_NOTIF.id && !item.id.startsWith('rev-notif-')
+      );
       if (isAdminAuthenticated) {
-        return [ADMIN_WITHDRAWAL_NOTIF, ...withoutAdminNotif];
+        return [ADMIN_WITHDRAWAL_NOTIF, ...withoutAdminItems];
       }
-      return withoutAdminNotif;
+      return withoutAdminItems;
     });
+  }, [isAdminAuthenticated]);
+
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
+    let cancelled = false;
+
+    const mergeMilestoneNotifs = (milestoneNotifs: AdminMilestoneNotification[]) => {
+      if (cancelled || !milestoneNotifs.length) return;
+      setNotificationsHistory((prev) => {
+        const withoutMilestones = prev.filter((item) => !item.id.startsWith('rev-notif-'));
+        const mapped = milestoneNotifs.slice(0, 10).map((n) => ({
+          id: n.id,
+          title: n.title,
+          body: n.message,
+          time: n.read ? 'Lida (Meta)' : 'Meta Atingida',
+        }));
+        return [...mapped, ...withoutMilestones];
+      });
+    };
+
+    fetchRevenueMilestones(true)
+      .then((res) => mergeMilestoneNotifs(res.notifications))
+      .catch(() => {});
+
+    const handleMilestoneUpdate = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail?.notifications) {
+        mergeMilestoneNotifs(detail.notifications);
+      }
+    };
+
+    window.addEventListener(REVENUE_MILESTONES_EVENT, handleMilestoneUpdate);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(REVENUE_MILESTONES_EVENT, handleMilestoneUpdate);
+    };
   }, [isAdminAuthenticated]);
 
   useEffect(() => {
@@ -79,17 +118,27 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({
 
     const unsubscribe = onForegroundMessage((payload) => {
       const combinedText = `${payload.title || ''} ${payload.body || ''}`.toLowerCase();
-      if (!isAdminAuthenticated && (combinedText.includes('saque') || combinedText.includes('sacar') || combinedText.includes('1.834') || combinedText.includes('saldo disponível') || combinedText.includes('disponível em conta'))) {
+      const isAdminOnlyPayload =
+        payload.data?.adminOnly === 'true' ||
+        combinedText.includes('saque') ||
+        combinedText.includes('sacar') ||
+        combinedText.includes('1.834') ||
+        combinedText.includes('saldo disponível') ||
+        combinedText.includes('disponível em conta') ||
+        combinedText.includes('meta de faturamento') ||
+        combinedText.includes('faturamento acumulado');
+
+      if (!isAdminAuthenticated && isAdminOnlyPayload) {
         return;
       }
       setNotificationsHistory(prev => [
         {
-          id: `notif-${Date.now()}`,
+          id: payload.data?.milestoneId ? `rev-notif-${payload.data.milestoneId}` : `notif-${Date.now()}`,
           title: payload.title,
           body: payload.body,
           time: 'Agora'
         },
-        ...prev
+        ...prev.filter((item) => !payload.data?.milestoneId || item.id !== `rev-notif-${payload.data.milestoneId}`)
       ]);
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.2 } });
     });

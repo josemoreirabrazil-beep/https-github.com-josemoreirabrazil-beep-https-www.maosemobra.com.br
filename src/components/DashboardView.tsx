@@ -36,7 +36,7 @@ import {
   Repeat,
   Lock
 } from 'lucide-react';
-import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser, SubscriptionPlanPricing, RealSubscribersStatusResponse } from '../types';
+import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser, SubscriptionPlanPricing, RealSubscribersStatusResponse, SubscriberCashflowSummary } from '../types';
 import type { NavTab } from './Navigation';
 import { MercadoPagoModal } from './MercadoPagoModal';
 import { PreConstructionChecklist } from './PreConstructionChecklist';
@@ -57,8 +57,19 @@ import {
   setActiveUserSubscription,
   type ActiveSubscriptionState
 } from '../services/subscriberBilling';
-import { MASTER_CREDENTIALS } from '../services/adminAuth';
+import { MASTER_CREDENTIALS, isAdminMasterAccount } from '../services/adminAuth';
 import { logBalanceAccessEvent } from '../services/balanceAudit';
+import {
+  fetchRevenueMilestones,
+  saveRevenueMilestone,
+  deleteRevenueMilestone,
+  markMilestoneNotificationRead,
+  markAllMilestoneNotificationsRead,
+  checkAndNotifyAdminRevenueMilestones,
+  REVENUE_MILESTONES_EVENT,
+  type RevenueMilestone,
+  type AdminMilestoneNotification,
+} from '../services/revenueMilestones';
 import confetti from 'canvas-confetti';
 
 interface DashboardViewProps {
@@ -104,13 +115,20 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
     onOpenWithdrawalModal,
   } = props;
 
-  const isAdmin = Boolean(props.adminUser);
+  const isAdminMaster = isAdminMasterAccount(props.adminUser, user);
+  const isAdmin = isAdminMaster;
 
   // Platform available plans (visible only to Admin Master Global)
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlanPricing[]>(() =>
     [...INITIAL_PLANS].sort((a, b) => a.price - b.price)
   );
   const [realSubscribersStatus, setRealSubscribersStatus] = useState<RealSubscribersStatusResponse | null>(null);
+  const [adminCashflowSummary, setAdminCashflowSummary] = useState<SubscriberCashflowSummary | null>(null);
+  const [revenueMilestones, setRevenueMilestones] = useState<RevenueMilestone[]>([]);
+  const [milestoneNotifications, setMilestoneNotifications] = useState<AdminMilestoneNotification[]>([]);
+  const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
+  const [newMilestoneTarget, setNewMilestoneTarget] = useState('');
+  const [isSavingMilestone, setIsSavingMilestone] = useState(false);
   const [isRefreshingSubscribers, setIsRefreshingSubscribers] = useState(false);
   const [subscriberStatusFilter, setSubscriberStatusFilter] = useState<'all' | 'active_paid' | 'active_free' | 'pending' | 'mp_live'>('all');
 
@@ -118,7 +136,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   const userHasProLaudo = hasProLaudoAccess(currentUserSub);
 
   const loadRealSubscribers = React.useCallback(async (forceRefresh = false) => {
-    if (!isAdmin) return;
+    if (!isAdminMaster) return;
     if (forceRefresh) {
       logBalanceAccessEvent({
         type: 'SENSITIVE_DATA_VIEW',
@@ -127,21 +145,40 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
         resource: 'DashboardView > Auditoria MP ao Vivo',
         details: 'Admin Master sincronizou os dados ao vivo de assinantes e pagamentos do Mercado Pago no Dashboard.',
         authorized: true,
-        actorEmail: props.adminUser?.email,
-        actorName: props.adminUser?.name,
+        actorEmail: props.adminUser?.email || user?.email || undefined,
+        actorName: props.adminUser?.name || user?.displayName || undefined,
         actorRole: 'ADMIN_MASTER',
       });
     }
     setIsRefreshingSubscribers(true);
     try {
-      const snapshot = await fetchRealSubscribersStatus(forceRefresh);
+      const [snapshot, cashflow, milestoneData] = await Promise.all([
+        fetchRealSubscribersStatus(forceRefresh),
+        fetchSubscribersCashflow().catch(() => null),
+        fetchRevenueMilestones(true).catch(() => ({ milestones: [], notifications: [] })),
+      ]);
       setRealSubscribersStatus(snapshot);
+      if (cashflow?.summary) {
+        setAdminCashflowSummary(cashflow.summary);
+      }
+      const currentRev = cashflow?.summary?.totalCollected ?? 0;
+      const evaluated = await checkAndNotifyAdminRevenueMilestones({
+        isAdminMaster: true,
+        currentRevenue: currentRev,
+        milestones: milestoneData.milestones,
+        actorEmail: props.adminUser?.email || user?.email || undefined,
+      });
+      setRevenueMilestones(evaluated.milestones);
+      setMilestoneNotifications(evaluated.notifications);
+      if (evaluated.newlyTriggered.length > 0) {
+        confetti({ particleCount: 90, spread: 70, origin: { y: 0.4 } });
+      }
     } catch (err) {
       console.warn('Could not load real subscribers status', err);
     } finally {
       setIsRefreshingSubscribers(false);
     }
-  }, [isAdmin, props.adminUser]);
+  }, [isAdminMaster, props.adminUser, user]);
 
   React.useEffect(() => {
     fetchSubscriptionPlans().then(plans => {
@@ -150,13 +187,71 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
       }
     }).catch(() => {});
 
-    if (!isAdmin) {
+    if (!isAdminMaster) {
       setRealSubscribersStatus(null);
+      setAdminCashflowSummary(null);
+      setRevenueMilestones([]);
+      setMilestoneNotifications([]);
       return;
     }
 
     loadRealSubscribers(false);
-  }, [isAdmin, loadRealSubscribers]);
+
+    const handleMilestoneEvent = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail?.milestones) setRevenueMilestones(detail.milestones);
+      if (detail?.notifications) setMilestoneNotifications(detail.notifications);
+    };
+    window.addEventListener(REVENUE_MILESTONES_EVENT, handleMilestoneEvent);
+    return () => window.removeEventListener(REVENUE_MILESTONES_EVENT, handleMilestoneEvent);
+  }, [isAdminMaster, loadRealSubscribers]);
+
+  const handleAddRevenueMilestone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdminMaster) return;
+    const numericTarget = Number(newMilestoneTarget.replace(',', '.'));
+    const title = newMilestoneTitle.trim() || `Meta R$ ${numericTarget.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+    if (!Number.isFinite(numericTarget) || numericTarget <= 0) return;
+
+    setIsSavingMilestone(true);
+    try {
+      const updatedList = await saveRevenueMilestone(true, { title, targetAmount: numericTarget, enabled: true });
+      const currentRev = adminCashflowSummary?.totalCollected ?? totalReceived;
+      const evaluated = await checkAndNotifyAdminRevenueMilestones({
+        isAdminMaster: true,
+        currentRevenue: currentRev,
+        milestones: updatedList,
+        actorEmail: props.adminUser?.email || user?.email || undefined,
+      });
+      setRevenueMilestones(evaluated.milestones);
+      setMilestoneNotifications(evaluated.notifications);
+      if (evaluated.newlyTriggered.length > 0) {
+        confetti({ particleCount: 90, spread: 70, origin: { y: 0.4 } });
+      }
+      setNewMilestoneTitle('');
+      setNewMilestoneTarget('');
+    } finally {
+      setIsSavingMilestone(false);
+    }
+  };
+
+  const handleDeleteRevenueMilestone = async (id: string) => {
+    if (!isAdminMaster) return;
+    const updated = await deleteRevenueMilestone(true, id);
+    setRevenueMilestones(updated);
+  };
+
+  const handleMarkMilestoneNotifRead = async (id: string) => {
+    if (!isAdminMaster) return;
+    const updated = await markMilestoneNotificationRead(true, id);
+    setMilestoneNotifications(updated);
+  };
+
+  const handleMarkAllMilestoneNotifsRead = async () => {
+    if (!isAdminMaster) return;
+    const updated = await markAllMilestoneNotificationsRead(true);
+    setMilestoneNotifications(updated);
+  };
 
 
 
@@ -696,57 +791,218 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           </div>
         </div>
 
-        {/* Real Cash & Balance Breakdown (Exclusivo Admin Master Global — Invisível para usuários/público) */}
-        {isAdmin && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
-            
-            {/* Valor Real Disponível em Conta */}
-            <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                    Valor Real Disponível em Conta
+        {/* Bloco financeiro restrito: visível APENAS para o Admin Master (painel-financeiro-restrito) */}
+        {isAdminMaster && (
+          <div className="painel-financeiro-restrito mt-4 p-4 sm:p-5 rounded-3xl bg-slate-900/5 dark:bg-slate-950/60 border border-emerald-500/30 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span>Painel Financeiro Restrito • Exclusivo Admin Master</span>
+              </div>
+              {onOpenWithdrawalModal && (
+                <button
+                  type="button"
+                  onClick={onOpenWithdrawalModal}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-xs transition cursor-pointer self-start sm:self-auto"
+                >
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>
+                    Valor real disponível em conta: R${' '}
+                    {(adminCashflowSummary?.totalCollected ?? availableCash).toLocaleString('pt-BR', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
-                  <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Repasse Automático PIX Ativo
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Valor Real Disponível em Conta */}
+              <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      Valor Real Disponível em Conta
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Repasse Automático PIX Ativo
+                    </span>
+                  </div>
+                  <div className={`text-2xl font-black ${(adminCashflowSummary?.totalCollected ?? availableCash) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                    R$ {(adminCashflowSummary?.totalCollected ?? availableCash).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-1 block">
+                    Repasse imediato de todo valor recebido p/ conta Mercado Pago via PIX (+55 73 99859-9213)
                   </span>
                 </div>
-                <div className={`text-2xl font-black ${availableCash >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                  R$ {availableCash.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+
+              {/* Faturamento Total / Valores Recebidos */}
+              <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Faturamento Total (Entradas)
+                </span>
+                <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                  R$ {(adminCashflowSummary?.totalCollected ?? totalReceived).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-1 block">
-                  Repasse imediato de todo valor recebido p/ conta Mercado Pago via PIX (+55 73 99859-9213)
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Total quitado por clientes e assinantes
+                </span>
+              </div>
+
+              {/* Valores Pendentes */}
+              <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                  Valores Pendentes a Pagar
+                </span>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                  R$ {(adminCashflowSummary?.pendingAmount ?? totalPendingExpenses).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Despesas, assinaturas e cotações em aberto
                 </span>
               </div>
             </div>
 
-            {/* Valores Recebidos */}
-            <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                Valores Recebidos (Entradas)
-              </span>
-              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
-                R$ {totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              <span className="text-[10px] text-slate-400 mt-1 block">
-                Total quitado por clientes e solicitantes
-              </span>
-            </div>
+            {/* Metas de Faturamento & Notificações Automáticas ao Admin Master */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-500" />
+                    <span>Metas de Faturamento &amp; Notificações Automáticas</span>
+                    {milestoneNotifications.filter((n) => !n.read).length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-black">
+                        {milestoneNotifications.filter((n) => !n.read).length} nova(s)
+                      </span>
+                    )}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Defina metas específicas de faturamento acumulado para receber alertas automáticos exclusivos do Admin Master ao atingir cada marco.
+                  </p>
+                </div>
 
-            {/* Valores Pendentes */}
-            <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                Valores Pendentes a Pagar
-              </span>
-              <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
-                R$ {totalPendingExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {milestoneNotifications.some((n) => !n.read) && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllMilestoneNotifsRead}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-bold cursor-pointer self-start sm:self-auto"
+                  >
+                    Marcar notificações como lidas
+                  </button>
+                )}
               </div>
-              <span className="text-[10px] text-slate-400 mt-1 block">
-                Despesas e cotações em aberto
-              </span>
-            </div>
 
+              {/* Alertas Automáticos Recentes de Metas Atingidas */}
+              {milestoneNotifications.filter((n) => !n.read).length > 0 && (
+                <div className="space-y-2">
+                  {milestoneNotifications
+                    .filter((n) => !n.read)
+                    .slice(0, 3)
+                    .map((notif) => (
+                      <div
+                        key={notif.id}
+                        className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-start justify-between gap-3"
+                      >
+                        <div className="space-y-0.5 text-xs">
+                          <div className="font-black text-emerald-800 dark:text-emerald-300">{notif.title}</div>
+                          <p className="text-[11px] text-slate-700 dark:text-slate-300">{notif.message}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleMarkMilestoneNotifRead(notif.id)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-bold shrink-0 cursor-pointer hover:bg-emerald-500"
+                        >
+                          Ciente
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              )}
+
+              {/* Formulário para Definir Nova Meta de Faturamento */}
+              <form onSubmit={handleAddRevenueMilestone} className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                <input
+                  type="text"
+                  value={newMilestoneTitle}
+                  onChange={(e) => setNewMilestoneTitle(e.target.value)}
+                  placeholder="Nome da meta (ex: Meta Trimestral)"
+                  className="sm:col-span-6 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  required
+                  value={newMilestoneTarget}
+                  onChange={(e) => setNewMilestoneTarget(e.target.value)}
+                  placeholder="Valor alvo (R$)"
+                  className="sm:col-span-3 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                />
+                <button
+                  type="submit"
+                  disabled={isSavingMilestone}
+                  className="sm:col-span-3 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isSavingMilestone ? 'Salvando...' : 'Definir Meta'}</span>
+                </button>
+              </form>
+
+              {/* Lista de Metas & Progresso */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {revenueMilestones.map((m) => {
+                  const currentRev = adminCashflowSummary?.totalCollected ?? totalReceived;
+                  const pct = m.targetAmount > 0 ? Math.min(100, Math.round((currentRev / m.targetAmount) * 100)) : 0;
+                  return (
+                    <div
+                      key={m.id}
+                      className={`p-3 rounded-2xl border space-y-2 ${
+                        m.reached
+                          ? 'bg-emerald-500/10 border-emerald-500/40'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-xs font-black text-slate-900 dark:text-white truncate">{m.title}</div>
+                          <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                            Alvo: R$ {m.targetAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRevenueMilestone(m.id)}
+                          className="text-[10px] text-slate-400 hover:text-rose-500 font-bold cursor-pointer"
+                          title="Remover meta"
+                        >
+                          Remover
+                        </button>
+                      </div>
+
+                      <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${m.reached ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className={m.reached ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
+                          {m.reached ? 'Meta atingida • Notificado' : `${pct}% atingido`}
+                        </span>
+                        <span className="text-slate-400">
+                          R$ {currentRev.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
 

@@ -25,6 +25,33 @@ export function getCachedAdminSession(): AdminMasterUser | null {
   }
 }
 
+export function isAdminMasterAccount(
+  adminUser?: AdminMasterUser | null,
+  user?: { role?: string | null; email?: string | null } | null
+): boolean {
+  const masterEmail = MASTER_CREDENTIALS.email.toLowerCase();
+  const adminRole = adminUser?.role?.toLowerCase();
+  const adminEmail = adminUser?.email?.toLowerCase();
+  const userRole = user?.role?.toLowerCase();
+  const userEmail = user?.email?.toLowerCase();
+
+  const hasValidAdminSession = Boolean(
+    adminUser &&
+      adminUser.token &&
+      (adminRole === 'admin_master' ||
+        adminRole === 'super_admin_master_global' ||
+        adminEmail === masterEmail)
+  );
+
+  const hasMasterUser = Boolean(
+    userRole === 'admin_master' ||
+      userRole === 'super_admin_master_global' ||
+      userEmail === masterEmail
+  );
+
+  return hasValidAdminSession || hasMasterUser;
+}
+
 export function saveAdminSession(user: AdminMasterUser): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(user));

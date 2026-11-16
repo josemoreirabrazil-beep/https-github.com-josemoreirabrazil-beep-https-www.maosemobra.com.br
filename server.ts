@@ -2972,6 +2972,233 @@ app.get('/api/admin/subscribers-cashflow', (req, res) => {
   });
 });
 
+// =========================================================================
+// Revenue Milestones & Automatic Admin Master Notifications
+// =========================================================================
+interface ServerRevenueMilestone {
+  id: string;
+  title: string;
+  targetAmount: number;
+  enabled: boolean;
+  reached: boolean;
+  notifiedAt: string | null;
+  createdAt: string;
+}
+
+interface ServerAdminMilestoneNotification {
+  id: string;
+  milestoneId: string;
+  title: string;
+  message: string;
+  targetAmount: number;
+  currentRevenue: number;
+  createdAt: string;
+  read: boolean;
+}
+
+let revenueMilestones: ServerRevenueMilestone[] = [
+  {
+    id: 'rev-goal-500',
+    title: 'Marco Inicial • R$ 500,00',
+    targetAmount: 500,
+    enabled: true,
+    reached: false,
+    notifiedAt: null,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'rev-goal-1500',
+    title: 'Expansão Mensal • R$ 1.500,00',
+    targetAmount: 1500,
+    enabled: true,
+    reached: false,
+    notifiedAt: null,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'rev-goal-5000',
+    title: 'Escala Construtoras • R$ 5.000,00',
+    targetAmount: 5000,
+    enabled: true,
+    reached: false,
+    notifiedAt: null,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'rev-goal-10000',
+    title: 'Meta Master • R$ 10.000,00',
+    targetAmount: 10000,
+    enabled: true,
+    reached: false,
+    notifiedAt: null,
+    createdAt: new Date().toISOString(),
+  },
+];
+
+let adminMilestoneNotifications: ServerAdminMilestoneNotification[] = [];
+
+function getAccumulatedApprovedRevenue(): number {
+  return Number(
+    subscriberPayments
+      .filter((p) => p.status === 'Aprovado')
+      .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+      .toFixed(2)
+  );
+}
+
+function evaluateRevenueMilestonesOnServer(triggerSource: string = 'Atualização de Faturamento'): ServerAdminMilestoneNotification[] {
+  const currentRevenue = getAccumulatedApprovedRevenue();
+  const nowIso = new Date().toISOString();
+  const newlyTriggered: ServerAdminMilestoneNotification[] = [];
+
+  revenueMilestones = revenueMilestones.map((m) => {
+    if (m.enabled && !m.notifiedAt && currentRevenue >= m.targetAmount) {
+      const notif: ServerAdminMilestoneNotification = {
+        id: `rev-notif-${m.id}-${Date.now()}`,
+        milestoneId: m.id,
+        title: `Meta de Faturamento Atingida: ${m.title}`,
+        message: `O faturamento acumulado atingiu R$ ${currentRevenue.toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} e superou a meta de R$ ${m.targetAmount.toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} (${triggerSource}).`,
+        targetAmount: m.targetAmount,
+        currentRevenue,
+        createdAt: nowIso,
+        read: false,
+      };
+      newlyTriggered.push(notif);
+      recordAuditLog(
+        'CONFIG_CHANGE',
+        'INFO',
+        'SYSTEM',
+        `Notificação automática ao Admin Master: ${notif.message}`,
+        undefined,
+        {
+          actorEmail: MASTER_EMAIL,
+          actorName: MASTER_NAME,
+          actorRole: 'ADMIN_MASTER',
+          action: 'REVENUE_MILESTONE_REACHED',
+          resource: 'AdminMaster > Metas de Faturamento',
+          authorized: true,
+          amountInvolved: currentRevenue,
+        }
+      );
+      return { ...m, reached: true, notifiedAt: nowIso };
+    }
+    if (m.enabled && currentRevenue >= m.targetAmount && !m.reached) {
+      return { ...m, reached: true };
+    }
+    return m;
+  });
+
+  if (newlyTriggered.length > 0) {
+    adminMilestoneNotifications = [...newlyTriggered, ...adminMilestoneNotifications].slice(0, 50);
+  }
+  return newlyTriggered;
+}
+
+app.get('/api/admin/revenue-milestones', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  evaluateRevenueMilestonesOnServer('Consulta Admin Master');
+  const currentRevenue = getAccumulatedApprovedRevenue();
+  res.json({
+    currentRevenue,
+    milestones: revenueMilestones,
+    notifications: adminMilestoneNotifications,
+    unreadCount: adminMilestoneNotifications.filter((n) => !n.read).length,
+  });
+});
+
+app.post('/api/admin/revenue-milestones', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  const { id, title, targetAmount, enabled } = req.body || {};
+  const numericTarget = Number(targetAmount);
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle || !Number.isFinite(numericTarget) || numericTarget <= 0) {
+    return res.status(400).json({ error: 'Título e valor alvo positivo são obrigatórios.' });
+  }
+
+  const idx = id ? revenueMilestones.findIndex((m) => m.id === id) : -1;
+  if (idx !== -1) {
+    const prevTarget = revenueMilestones[idx].targetAmount;
+    revenueMilestones[idx] = {
+      ...revenueMilestones[idx],
+      title: cleanTitle,
+      targetAmount: numericTarget,
+      enabled: enabled !== undefined ? Boolean(enabled) : revenueMilestones[idx].enabled,
+      reached: numericTarget !== prevTarget ? false : revenueMilestones[idx].reached,
+      notifiedAt: numericTarget !== prevTarget ? null : revenueMilestones[idx].notifiedAt,
+    };
+  } else {
+    revenueMilestones.push({
+      id: id || `rev-goal-${Date.now()}`,
+      title: cleanTitle,
+      targetAmount: numericTarget,
+      enabled: enabled !== undefined ? Boolean(enabled) : true,
+      reached: false,
+      notifiedAt: null,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  revenueMilestones.sort((a, b) => a.targetAmount - b.targetAmount);
+  const triggered = evaluateRevenueMilestonesOnServer('Meta Definida no Dashboard');
+  res.json({
+    success: true,
+    milestones: revenueMilestones,
+    notifications: adminMilestoneNotifications,
+    newlyTriggered: triggered,
+  });
+});
+
+app.delete('/api/admin/revenue-milestones/:id', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  revenueMilestones = revenueMilestones.filter((m) => m.id !== req.params.id);
+  res.json({ success: true, milestones: revenueMilestones });
+});
+
+app.post('/api/admin/revenue-milestones/notifications/read-all', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  adminMilestoneNotifications = adminMilestoneNotifications.map((n) => ({ ...n, read: true }));
+  res.json({ success: true, notifications: adminMilestoneNotifications });
+});
+
+app.post('/api/admin/revenue-milestones/notifications/:id/read', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (!token || !verifyMasterToken(token)) {
+    return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+  }
+
+  adminMilestoneNotifications = adminMilestoneNotifications.map((n) =>
+    n.id === req.params.id ? { ...n, read: true } : n
+  );
+  res.json({ success: true, notifications: adminMilestoneNotifications });
+});
+
 
 // Create or Update Subscriber Payment Record
 app.post('/api/admin/subscribers-payment', (req, res) => {
@@ -3003,6 +3230,7 @@ app.post('/api/admin/subscribers-payment', (req, res) => {
           triggerSource: 'Automático (Pagamento Aprovado)',
         });
       }
+      evaluateRevenueMilestonesOnServer(`Pagamento Atualizado: ${paymentData.subscriberName}`);
       recordAuditLog('CONFIG_CHANGE', 'INFO', req.ip || '127.0.0.1', `Registro financeiro de assinante atualizado: ${paymentData.subscriberName} (R$ ${paymentData.amount})`);
       return res.json({ success: true, payment: subscriberPayments[idx] });
     }
@@ -3050,6 +3278,7 @@ app.post('/api/admin/subscribers-payment', (req, res) => {
     });
   }
 
+  evaluateRevenueMilestonesOnServer(`Novo Pagamento: ${newPayment.subscriberName}`);
   res.json({ success: true, payment: newPayment });
 });
 
@@ -3264,6 +3493,7 @@ app.post('/api/admin/subscribers-payment/:id/status', (req, res) => {
     });
   }
 
+  evaluateRevenueMilestonesOnServer(`Status Alterado: ${payment.subscriberName}`);
   recordAuditLog('CONFIG_CHANGE', 'INFO', req.ip || '127.0.0.1', `Status do assinante ${payment.subscriberName} alterado para ${status}`);
   res.json({ success: true, payment });
 });
@@ -5496,6 +5726,10 @@ app.post('/api/mercadopago/transfer-pix', async (req, res) => {
       }
     );
 
+    if (!isMaster) {
+      return res.status(401).json({ error: 'Acesso restrito ao Admin Master Global.' });
+    }
+
     if (transferAmount <= 0) {
       return res.status(400).json({ error: 'Nenhum valor disponível para transferência imediata.' });
     }
@@ -5593,6 +5827,13 @@ app.get('/api/mercadopago/auto-transfers-history', (req, res) => {
         authorized: false,
       }
     );
+    return res.status(401).json({
+      error: 'Acesso restrito ao Admin Master Global.',
+      enabled: false,
+      totalTransferred: 0,
+      recentCount: 0,
+      history: [],
+    });
   }
 
   return res.json({

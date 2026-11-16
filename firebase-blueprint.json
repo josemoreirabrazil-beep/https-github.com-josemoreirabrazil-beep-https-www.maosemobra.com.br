@@ -1,0 +1,253 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized Admin Master Global identity record for RBAC verification",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin_master", "SUPER_ADMIN_MASTER_GLOBAL"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "FinancialSummary": {
+      "title": "FinancialSummary",
+      "description": "Restricted platform revenue and real available account balance summary",
+      "type": "object",
+      "properties": {
+        "totalCollected": {
+          "type": "number"
+        },
+        "availableBalance": {
+          "type": "number"
+        },
+        "pendingAmount": {
+          "type": "number"
+        },
+        "currency": {
+          "type": "string",
+          "maxLength": 10
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["totalCollected", "availableBalance", "pendingAmount", "currency", "updatedBy", "updatedAt"]
+    },
+    "WithdrawalRecord": {
+      "title": "WithdrawalRecord",
+      "description": "Restricted Admin Master PIX transfer record for real available account balance",
+      "type": "object",
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "pixKey": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "destination": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved_pix_payout", "failed", "cancelled"]
+        },
+        "requestedBy": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["transferId", "amount", "pixKey", "destination", "status", "requestedBy", "createdAt"]
+    },
+    "SubscriberPayment": {
+      "title": "SubscriberPayment",
+      "description": "Restricted subscriber billing and payment record",
+      "type": "object",
+      "properties": {
+        "subscriberEmail": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "planCode": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "amount": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Pendente", "Aprovado", "Atrasado", "Isento / Cortesia", "Cancelado"]
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["subscriberEmail", "planCode", "amount", "status", "createdBy", "createdAt"]
+    },
+    "BalanceAuditLog": {
+      "title": "BalanceAuditLog",
+      "description": "Restricted security audit trail for balance access and PIX transfer attempts",
+      "type": "object",
+      "properties": {
+        "eventType": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "actorUid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "actorEmail": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "authorized": {
+          "type": "boolean"
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["eventType", "actorUid", "authorized", "details", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Isolated private user profile with PII",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 160
+        },
+        "planTier": {
+          "type": "string",
+          "enum": ["free", "subscriber_paid", "subscriber_pro"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "planTier", "createdAt", "updatedAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Construction site project owned by an authenticated user",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Em andamento", "Planejamento", "Concluída", "Pausada"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "title", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Admin Master RBAC registry (Admin Master only)"
+    },
+    "/financial_summary/{docId}": {
+      "schema": { "$ref": "#/entities/FinancialSummary" },
+      "description": "System revenue and real available balance documents (Admin Master only)"
+    },
+    "/withdrawals/{withdrawalId}": {
+      "schema": { "$ref": "#/entities/WithdrawalRecord" },
+      "description": "PIX transfer / withdrawal requests and receipts (Admin Master only)"
+    },
+    "/transfers/{transferId}": {
+      "schema": { "$ref": "#/entities/WithdrawalRecord" },
+      "description": "Automatic PIX sweep and Mercado Pago transfer records (Admin Master only)"
+    },
+    "/subscriber_payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/SubscriberPayment" },
+      "description": "Platform subscriber payments and billing ledger (Admin Master only)"
+    },
+    "/balance_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/BalanceAuditLog" },
+      "description": "Audit log of balance access and transfer attempts (Admin Master only)"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User PII profiles restricted to owner or Admin Master"
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "User construction projects restricted to owner or Admin Master"
+    }
+  }
+}
