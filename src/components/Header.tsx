@@ -188,9 +188,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <span className="text-[10px] text-slate-400 dark:text-slate-400 truncate">
                     {currentProject.clientInstitutionalName || currentProject.clientName || currentProject.type}
                   </span>
-                  <span className="text-[10px] font-bold text-slate-900 dark:text-amber-400">
-                    R$ {currentProject.budgetTotal.toLocaleString('pt-BR')}
-                  </span>
+
                 </div>
               </div>
               <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
@@ -275,28 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* 🔔 FIREBASE CLOUD MESSAGING PUSH NOTIFICATIONS */}
             <PushNotificationCenter isAdminAuthenticated={isAdminAuthenticated} />
 
-            {/* 🔥 BOTÃO OFICIAL DE SAQUE P/ MERCADO PAGO — VISÍVEL APENAS PARA ADMIN MASTER GLOBAL 🔥 */}
-            {isAdminAuthenticated && onOpenWithdrawalModal && (
-              <button
-                onClick={onOpenWithdrawalModal}
-                title={`Sacar R$ ${adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX para sua conta Mercado Pago`}
-                className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95 border border-emerald-400/60 animate-pulse"
-              >
-                <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                </span>
-                <div className="w-4 h-4 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-                  <Wallet className="w-3 h-3 text-white" />
-                </div>
-                <span className="font-black hidden 2xl:inline">
-                  Sacar R$ {adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ MP
-                </span>
-                <span className="font-black 2xl:hidden">
-                  Sacar R$ {adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
-              </button>
-            )}
+
 
             {/* Baixar App / Instalar PWA Button */}
             <button
