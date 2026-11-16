@@ -106,9 +106,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
   const isAdmin = Boolean(props.adminUser);
 
-  // Platform financial metrics & available plans (visible only to Admin Master Global)
-  const [platformTotal, setPlatformTotal] = useState<number>(1834.80);
-  const [isPlatformWithdrawing, setIsPlatformWithdrawing] = useState(false);
+  // Platform available plans (visible only to Admin Master Global)
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlanPricing[]>(() =>
     [...INITIAL_PLANS].sort((a, b) => a.price - b.price)
   );
@@ -157,81 +155,10 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
       return;
     }
 
-    fetchSubscribersCashflow().then(res => {
-      if (res?.summary?.totalCollected && res.summary.totalCollected > 0) {
-        setPlatformTotal(res.summary.totalCollected);
-      }
-    }).catch(err => {
-      console.warn('Could not refresh cashflow summary', err);
-    });
-
     loadRealSubscribers(false);
   }, [isAdmin, loadRealSubscribers]);
 
-  const handlePlatformWithdrawal = async () => {
-    if (!isAdmin) {
-      logBalanceAccessEvent({
-        type: 'BALANCE_ACCESS_DENIED',
-        severity: 'CRITICAL',
-        action: 'DASHBOARD_WITHDRAW_BLOCKED',
-        resource: 'DashboardView',
-        details: 'Tentativa bloqueada de acionar saque direto no DashboardView sem sessão Admin Master.',
-        authorized: false,
-        actorEmail: user?.email || null,
-        actorName: user?.displayName || null,
-      });
-      return;
-    }
-    if (platformTotal <= 0) {
-      alert('Nenhum valor disponível para saque no caixa da plataforma.');
-      return;
-    }
 
-    if (!confirm(`Deseja transferir R$ ${platformTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} para a conta Mercado Pago via PIX (${MASTER_CREDENTIALS.pixKey})?`)) {
-      return;
-    }
-
-    logBalanceAccessEvent({
-      type: 'BALANCE_WITHDRAW_ATTEMPT',
-      severity: 'WARNING',
-      action: 'DASHBOARD_DIRECT_WITHDRAW',
-      resource: 'DashboardView > Saque Direto',
-      details: `Admin Master (${props.adminUser?.email}) acionou saque direto de R$ ${platformTotal.toFixed(2)} via PIX no Dashboard.`,
-      authorized: true,
-      amountInvolved: platformTotal,
-      actorEmail: props.adminUser?.email,
-      actorName: props.adminUser?.name,
-      actorRole: 'ADMIN_MASTER',
-    });
-
-    setIsPlatformWithdrawing(true);
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (props.adminUser?.token) headers['Authorization'] = `Bearer ${props.adminUser.token}`;
-
-      const response = await fetch('/api/mercadopago/transfer-pix', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          amount: platformTotal,
-          projectName: 'Saque Direto Dashboard - Mãos em Obra',
-          beneficiaryName: MASTER_CREDENTIALS.name,
-          pixKey: MASTER_CREDENTIALS.pixKey,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Erro na transferência PIX');
-
-      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-      alert(`Sucesso! R$ ${platformTotal.toFixed(2)} transferidos para sua conta Mercado Pago.`);
-      setPlatformTotal(0);
-    } catch (err: any) {
-      alert(err.message || 'Erro ao realizar saque via PIX');
-    } finally {
-      setIsPlatformWithdrawing(false);
-    }
-  };
 
   // Financial metrics (Separated by Real Incomes & Real Outflows)
   const totalPlanned = Number(project.budgetTotal) || 0;
@@ -597,22 +524,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               <span>Admin Master</span>
             </button>
 
-            {/* 🔥 BOTÃO DE SAQUE OFICIAL P/ MERCADO PAGO — VISÍVEL APENAS PARA ADMIN MASTER GLOBAL 🔥 */}
-            {isAdmin && (
-              <button
-                onClick={onOpenWithdrawalModal || handlePlatformWithdrawal}
-                disabled={isPlatformWithdrawing}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-lg shadow-emerald-600/30 transition cursor-pointer active:scale-95 border border-emerald-400/50"
-                title={`Sacar R$ ${(platformTotal || 1834.80).toFixed(2)} para Mercado Pago via PIX`}
-              >
-                {isPlatformWithdrawing ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                )}
-                <span>Sacar R$ {(platformTotal || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
-              </button>
-            )}
+
 
             {/* PIX Quick QR Code & Key */}
             <button
@@ -811,17 +723,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               </span>
             </div>
 
-            {/* 🔥 QUICK WITHDRAWAL BUTTON — VISÍVEL APENAS PARA ADMIN MASTER GLOBAL 🔥 */}
-            {isAdmin && (
-              <button
-                onClick={onOpenWithdrawalModal || handlePlatformWithdrawal}
-                disabled={isPlatformWithdrawing}
-                className="mt-4 w-full py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {isPlatformWithdrawing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-                <span>SACAR R$ {(platformTotal || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} P/ MERCADO PAGO</span>
-              </button>
-            )}
+
           </div>
 
           {/* Valores Recebidos */}
