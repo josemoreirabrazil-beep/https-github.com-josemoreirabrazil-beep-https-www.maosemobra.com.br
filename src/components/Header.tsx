@@ -19,7 +19,8 @@ import {
   Wallet,
   ArrowUpRight,
   FileCheck2,
-  Search
+  Search,
+  Sparkles
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';
@@ -50,6 +51,7 @@ interface HeaderProps {
   onNavigateToReports?: () => void;
   onOpenInstallModal?: () => void;
   onOpenWithdrawalModal?: () => void;
+  adminWithdrawalAmount?: number;
   onOpenSearchModal?: () => void;
 }
 
@@ -75,6 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToReports,
   onOpenInstallModal,
   onOpenWithdrawalModal,
+  adminWithdrawalAmount = 1834.80,
   onOpenSearchModal,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -270,24 +273,30 @@ export const Header: React.FC<HeaderProps> = ({
             <LanguageSelector variant="header" showLabel={true} />
 
             {/* 🔔 FIREBASE CLOUD MESSAGING PUSH NOTIFICATIONS */}
-            <PushNotificationCenter />
+            <PushNotificationCenter isAdminAuthenticated={isAdminAuthenticated} />
 
-            {/* 🔥 BOTÃO OFICIAL DE SAQUE R$ 1.834,80 P/ MERCADO PAGO COM ANIMAÇÃO DE PULSAÇÃO SUAVE 🔥 */}
-            <button
-              onClick={onOpenWithdrawalModal}
-              title="Sacar R$ 1.834,80 via PIX para sua conta Mercado Pago"
-              className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95 border border-emerald-400/60 animate-pulse"
-            >
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-              </span>
-              <div className="w-4 h-4 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-                <Wallet className="w-3 h-3 text-white" />
-              </div>
-              <span className="font-black hidden 2xl:inline">Sacar R$ 1.834,80 p/ MP</span>
-              <span className="font-black 2xl:hidden">Sacar R$ 1.834,80</span>
-            </button>
+            {/* 🔥 BOTÃO OFICIAL DE SAQUE P/ MERCADO PAGO — VISÍVEL APENAS PARA ADMIN MASTER GLOBAL 🔥 */}
+            {isAdminAuthenticated && onOpenWithdrawalModal && (
+              <button
+                onClick={onOpenWithdrawalModal}
+                title={`Sacar R$ ${adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX para sua conta Mercado Pago`}
+                className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-black rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/30 transition cursor-pointer shrink-0 whitespace-nowrap active:scale-95 border border-emerald-400/60 animate-pulse"
+              >
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </span>
+                <div className="w-4 h-4 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                  <Wallet className="w-3 h-3 text-white" />
+                </div>
+                <span className="font-black hidden 2xl:inline">
+                  Sacar R$ {adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ MP
+                </span>
+                <span className="font-black 2xl:hidden">
+                  Sacar R$ {adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </button>
+            )}
 
             {/* Baixar App / Instalar PWA Button */}
             <button

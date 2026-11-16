@@ -4707,6 +4707,94 @@ app.post('/api/mercadopago/process-payment', async (req, res) => {
   }
 });
 
+// Mercado Pago: Teste de Checkout Transparente de R$ 1,00 (Configuração e Simulação Instantânea)
+app.all(['/api/mercadopago/test-checkout-1real'], async (req, res) => {
+  try {
+    const isPost = req.method === 'POST';
+    const body = isPost ? req.body || {} : req.query || {};
+    const { action = 'init', payerName = 'Teste Homologação', payerEmail = 'teste.checkout@maosemobra.com.br', referenceId, method = 'PIX' } = body;
+    const testRef = referenceId || `TEST-CHK-1REAL-${Date.now()}`;
+    const testAmount = 1.00;
+
+    if (action === 'simulate_approval') {
+      const paymentId = `MP-TEST-1REAL-${Date.now()}`;
+      realTimePaymentStatuses.set(testRef, {
+        status: 'approved',
+        statusDetail: 'accredited',
+        amount: testAmount,
+        updatedAt: Date.now(),
+      });
+
+      webhookEventsLog.unshift({
+        id: `EVT-TEST-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        sourceIp: req.ip || '127.0.0.1',
+        eventType: 'payment.approved (teste checkout transparente)',
+        paymentId,
+        externalReference: testRef,
+        status: 'approved',
+        amount: testAmount,
+        payerEmail: String(payerEmail || 'teste.checkout@maosemobra.com.br'),
+        matchedEntity: `Homologação Checkout R$ 1,00 (${method}): ${payerName}`,
+        result: 'Aprovado com sucesso via teste de checkout transparente de R$ 1,00.',
+      });
+
+      // Emissão opcional de registro fiscal simulado para o teste
+      try {
+        autoEmitNfseForPayment({
+          paymentId,
+          paymentReference: testRef,
+          tomadorName: payerName || 'Tomador Teste de Homologação',
+          tomadorEmail: payerEmail || 'teste.checkout@maosemobra.com.br',
+          planType: 'Teste de Checkout Transparente (R$ 1,00)',
+          grossAmount: 1.00,
+          triggerSource: 'Automático (Pagamento Aprovado)',
+        });
+      } catch (nfseErr) {
+        console.warn('Nota fiscal no teste de checkout 1 real (ignorado):', nfseErr);
+      }
+
+      return res.json({
+        success: true,
+        status: 'approved',
+        statusDetail: 'accredited',
+        paymentId,
+        referenceId: testRef,
+        amount: testAmount,
+        method,
+        approvedAt: new Date().toISOString(),
+        message: 'Teste de Checkout Transparente de R$ 1,00 aprovado com sucesso!',
+      });
+    }
+
+    return res.json({
+      success: true,
+      amount: testAmount,
+      referenceId: testRef,
+      mode: 'transparent_checkout_test',
+      pix: {
+        amount: 1.00,
+        receiver: 'MAOS EM OBRA',
+        key: '+55 73998599213',
+        description: 'Teste Checkout Transparente R$ 1,00',
+      },
+      demoCard: {
+        number: '4532 0123 4567 8910',
+        holder: payerName || 'TESTE CHECKOUT R$ 1,00',
+        month: '12',
+        year: '2028',
+        cvv: '123',
+        cpf: '123.456.789-00',
+        installments: '1x de R$ 1,00 (Sem juros)',
+      },
+      message: 'Ambiente de teste de Checkout Transparente de R$ 1,00 pronto para validação.',
+    });
+  } catch (error: any) {
+    console.error('Error in /api/mercadopago/test-checkout-1real:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao processar teste de checkout transparente' });
+  }
+});
+
 // Mercado Pago: Check Payment Status
 app.get('/api/mercadopago/check-payment/:id', async (req, res) => {
   try {

@@ -15,7 +15,10 @@ import {
   Sparkles,
   CheckCircle2,
   SlidersHorizontal,
-  Repeat
+  Repeat,
+  Printer,
+  ShieldCheck,
+  FileText
 } from 'lucide-react';
 
 declare global {
@@ -495,20 +498,22 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
                     <Repeat className="w-3.5 h-3.5 text-[#009ee3]" />
-                    Planos Disponíveis ({plans.length} opções — Mensal, Anual Construtoras e Gratuito):
+                    Planos Disponíveis ({plans.length} opções):
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomInput(prev => !prev)}
-                    className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition flex items-center gap-1 cursor-pointer ${
-                      showCustomInput || selectedOptionId === 'manual-custom'
-                        ? 'bg-[#009ee3] text-white border-[#009ee3]'
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-[#009ee3]'
-                    }`}
-                  >
-                    <SlidersHorizontal className="w-3 h-3" />
-                    <span>Digitar Outro Valor</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomInput(prev => !prev)}
+                      className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition flex items-center gap-1 cursor-pointer ${
+                        showCustomInput || selectedOptionId === 'manual-custom'
+                          ? 'bg-[#009ee3] text-white border-[#009ee3]'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-[#009ee3]'
+                      }`}
+                    >
+                      <SlidersHorizontal className="w-3 h-3" />
+                      <span>Digitar Outro Valor</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -641,7 +646,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
                 }`}
               >
                 <QrCode className="w-4 h-4 text-emerald-600" />
-                <span>PIX (QR Code &amp; Chave Celular)</span>
+                <span>PIX Transparente (QR Code &amp; Copia e Cola)</span>
               </button>
 
               <button
@@ -653,7 +658,7 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
                 }`}
               >
                 <CreditCard className="w-4 h-4 text-[#009ee3]" />
-                <span>Cartão 12x / Boleto</span>
+                <span>Cartão de Crédito Transparente</span>
               </button>
             </div>
           )}

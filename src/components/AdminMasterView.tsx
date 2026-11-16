@@ -93,6 +93,7 @@ import { loadCorporateContacts, updateCorporateContactStatus } from '../services
 import { RecebimentosWebhookManager } from './RecebimentosWebhookManager';
 import { InvitationMetricsManager } from './InvitationMetricsManager';
 import { SubscriberBillingDispatcher } from './SubscriberBillingDispatcher';
+import { MercadoPagoModal } from './MercadoPagoModal';
 import { FiscalNfseManager } from './FiscalNfseManager';
 import { FiscalAutomationModule } from './FiscalAutomationModule';
 import { BatchInvitationsView } from './BatchInvitationsView';
@@ -744,16 +745,18 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
           {/* Quick Actions */}
           <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0">
-            {/* ⚡ BOTÃO DE SAQUE IMEDIATO DE R$ 1.834,80 PARA O ADMIN MASTER ⚡ */}
+            {/* ⚡ BOTÃO DE SAQUE IMEDIATO PARA O ADMIN MASTER GLOBAL ⚡ */}
             <button
               onClick={handleAdminWithdrawalClick}
               disabled={isWithdrawing || cashflowSummary.totalCollected <= 0}
               className="px-4 py-3 bg-gradient-to-r from-emerald-500 via-teal-500 to-[#009ee3] hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-xl border border-emerald-300 transition cursor-pointer active:scale-95"
-              title="Disparo de Saque Imediato R$ 1.834,80 via PIX para Mercado Pago"
+              title={`Disparo de Saque Imediato R$ ${(cashflowSummary.totalCollected || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX para Mercado Pago`}
             >
               <Wallet className="w-4 h-4 text-slate-950" />
               <span>
-                {isWithdrawing ? 'Transferindo R$ 1.834,80...' : 'Sacar R$ 1.834,80 Imediato (PIX)'}
+                {isWithdrawing
+                  ? `Transferindo R$ ${(cashflowSummary.totalCollected || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}...`
+                  : `Sacar R$ ${(cashflowSummary.totalCollected || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Imediato (PIX)`}
               </span>
             </button>
 
@@ -1134,23 +1137,25 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={handleAdminWithdrawalClick}
-                disabled={isWithdrawing || cashflowSummary.totalCollected <= 0}
-                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 shrink-0"
-              >
-                {isWithdrawing ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Transferindo via PIX...</span>
-                  </>
-                ) : (
-                  <>
-                    <ArrowUpRight className="w-4 h-4" />
-                    <span>Sacar R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                <button
+                  onClick={handleAdminWithdrawalClick}
+                  disabled={isWithdrawing || cashflowSummary.totalCollected <= 0}
+                  className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  {isWithdrawing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Transferindo via PIX...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowUpRight className="w-4 h-4" />
+                      <span>Sacar R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3 mt-2">

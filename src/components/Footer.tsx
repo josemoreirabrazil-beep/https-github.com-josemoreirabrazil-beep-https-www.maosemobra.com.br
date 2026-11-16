@@ -37,6 +37,7 @@ interface FooterProps {
   isAdminAuthenticated: boolean;
   onOpenInstallModal?: () => void;
   onOpenWithdrawalModal?: () => void;
+  adminWithdrawalAmount?: number;
 }
 
 export const Footer: React.FC<FooterProps> = ({
@@ -50,6 +51,7 @@ export const Footer: React.FC<FooterProps> = ({
   isAdminAuthenticated,
   onOpenInstallModal,
   onOpenWithdrawalModal,
+  adminWithdrawalAmount = 1834.80,
 }) => {
   const laborCount = team.filter(m => {
     const isSupplier = m.role.toLowerCase().includes('loja') || m.role.toLowerCase().includes('madeireira') || m.role.toLowerCase().includes('depósito') || m.role.toLowerCase().includes('fornecedor');
@@ -138,15 +140,17 @@ export const Footer: React.FC<FooterProps> = ({
               <span>Oportunidades</span>
             </button>
 
-            {/* Sacar R$ 1.834,80 p/ Mercado Pago Link */}
-            {onOpenWithdrawalModal && (
+            {/* Sacar p/ Mercado Pago Link (Somente Admin Master Global) */}
+            {isAdminAuthenticated && onOpenWithdrawalModal && (
               <button
                 onClick={onOpenWithdrawalModal}
                 className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black border border-emerald-400/50 transition cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-600/20 active:scale-95"
-                title="Sacar R$ 1.834,80 via PIX para o Mercado Pago"
+                title={`Sacar R$ ${adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX para o Mercado Pago`}
               >
                 <Wallet className="w-3.5 h-3.5 text-emerald-200" />
-                <span>Sacar R$ 1.834,80 p/ Mercado Pago</span>
+                <span>
+                  Sacar R$ {adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago
+                </span>
               </button>
             )}
 

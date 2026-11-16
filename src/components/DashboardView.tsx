@@ -103,7 +103,9 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
     onOpenWithdrawalModal,
   } = props;
 
-  // Platform financial metrics & available plans
+  const isAdmin = Boolean(props.adminUser);
+
+  // Platform financial metrics & available plans (visible only to Admin Master Global)
   const [platformTotal, setPlatformTotal] = useState<number>(1834.80);
   const [isPlatformWithdrawing, setIsPlatformWithdrawing] = useState(false);
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlanPricing[]>(() =>
@@ -117,6 +119,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   const userHasProLaudo = hasProLaudoAccess(currentUserSub);
 
   const loadRealSubscribers = React.useCallback(async (forceRefresh = false) => {
+    if (!isAdmin) return;
     setIsRefreshingSubscribers(true);
     try {
       const snapshot = await fetchRealSubscribersStatus(forceRefresh);
@@ -126,9 +129,20 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
     } finally {
       setIsRefreshingSubscribers(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   React.useEffect(() => {
+    fetchSubscriptionPlans().then(plans => {
+      if (plans && plans.length > 0) {
+        setAvailablePlans([...plans].sort((a, b) => a.price - b.price));
+      }
+    }).catch(() => {});
+
+    if (!isAdmin) {
+      setRealSubscribersStatus(null);
+      return;
+    }
+
     fetchSubscribersCashflow().then(res => {
       if (res?.summary?.totalCollected && res.summary.totalCollected > 0) {
         setPlatformTotal(res.summary.totalCollected);
@@ -137,16 +151,11 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
       console.warn('Could not refresh cashflow summary', err);
     });
 
-    fetchSubscriptionPlans().then(plans => {
-      if (plans && plans.length > 0) {
-        setAvailablePlans([...plans].sort((a, b) => a.price - b.price));
-      }
-    }).catch(() => {});
-
     loadRealSubscribers(false);
-  }, [props.adminUser, loadRealSubscribers]);
+  }, [isAdmin, loadRealSubscribers]);
 
   const handlePlatformWithdrawal = async () => {
+    if (!isAdmin) return;
     if (platformTotal <= 0) {
       alert('Nenhum valor disponível para saque no caixa da plataforma.');
       return;
@@ -476,7 +485,9 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                 Seja bem-vindo ao Aplicativo Mãos em Obra (www.maosemobra.com.br)
               </h2>
               <p className="text-xs sm:text-sm font-semibold text-slate-900/90 leading-relaxed mt-1 max-w-3xl">
-                Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO, acompanhe fluxo de caixa, solide orçamentos de insumos com frete/mobilização e efetue saques imediatos via PIX.
+                {isAdmin
+                  ? 'Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO, acompanhe fluxo de caixa, solicite orçamentos de insumos com frete/mobilização e efetue saques imediatos via PIX.'
+                  : 'Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO, acompanhe o fluxo de caixa da sua obra e solicite orçamentos de insumos com frete e mobilização.'}
               </p>
             </div>
           </div>
@@ -524,13 +535,15 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               <span>{onlineCount} On-line</span>
             </div>
 
-            {/* Assinantes Reais Inscritos & Ativos */}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs font-bold">
-              <Users className="w-3.5 h-3.5" />
-              <span>
-                {enrolledSubscribersCount} Inscritos · {activeSubscribersCount} Ativos
-              </span>
-            </div>
+            {/* Assinantes Reais Inscritos & Ativos (Somente Admin Master Global) */}
+            {isAdmin && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs font-bold">
+                <Users className="w-3.5 h-3.5" />
+                <span>
+                  {enrolledSubscribersCount} Inscritos · {activeSubscribersCount} Ativos
+                </span>
+              </div>
+            )}
 
             {/* Admin Master Global Access Button */}
             <button
@@ -542,20 +555,22 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               <span>Admin Master</span>
             </button>
 
-            {/* 🔥 BOTÃO DE SAQUE OFICIAL P/ MERCADO PAGO (100% VISÍVEL ONLINE) 🔥 */}
-            <button
-              onClick={onOpenWithdrawalModal || handlePlatformWithdrawal}
-              disabled={isPlatformWithdrawing}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-lg shadow-emerald-600/30 transition cursor-pointer active:scale-95 border border-emerald-400/50"
-              title={`Sacar R$ ${(platformTotal || 1834.80).toFixed(2)} para Mercado Pago via PIX`}
-            >
-              {isPlatformWithdrawing ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              )}
-              <span>Sacar R$ {(platformTotal || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
-            </button>
+            {/* 🔥 BOTÃO DE SAQUE OFICIAL P/ MERCADO PAGO — VISÍVEL APENAS PARA ADMIN MASTER GLOBAL 🔥 */}
+            {isAdmin && (
+              <button
+                onClick={onOpenWithdrawalModal || handlePlatformWithdrawal}
+                disabled={isPlatformWithdrawing}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-lg shadow-emerald-600/30 transition cursor-pointer active:scale-95 border border-emerald-400/50"
+                title={`Sacar R$ ${(platformTotal || 1834.80).toFixed(2)} para Mercado Pago via PIX`}
+              >
+                {isPlatformWithdrawing ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                )}
+                <span>Sacar R$ {(platformTotal || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
+              </button>
+            )}
 
             {/* PIX Quick QR Code & Key */}
             <button
@@ -737,28 +752,34 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
                   Disponível em Caixa (Saldo Real)
                 </span>
-                <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Auto-Saque PIX Ativo
-                </span>
+                {isAdmin && (
+                  <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Auto-Saque PIX Ativo
+                  </span>
+                )}
               </div>
               <div className={`text-2xl font-black ${availableCash >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                 R$ {availableCash.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-1 block">
-                Repasse imediato de todo valor recebido p/ conta Mercado Pago via PIX (+55 73 99859-9213)
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-1 block">
+                {isAdmin
+                  ? 'Repasse imediato de todo valor recebido p/ conta Mercado Pago via PIX (+55 73 99859-9213)'
+                  : 'Saldo líquido disponível da obra atual (Entradas - Pagamentos)'}
               </span>
             </div>
 
-            {/* 🔥 QUICK WITHDRAWAL BUTTON (100% VISÍVEL ONLINE) 🔥 */}
-            <button
-              onClick={onOpenWithdrawalModal || handlePlatformWithdrawal}
-              disabled={isPlatformWithdrawing}
-              className="mt-4 w-full py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              {isPlatformWithdrawing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
-              <span>SACAR R$ {(platformTotal || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} P/ MERCADO PAGO</span>
-            </button>
+            {/* 🔥 QUICK WITHDRAWAL BUTTON — VISÍVEL APENAS PARA ADMIN MASTER GLOBAL 🔥 */}
+            {isAdmin && (
+              <button
+                onClick={onOpenWithdrawalModal || handlePlatformWithdrawal}
+                disabled={isPlatformWithdrawing}
+                className="mt-4 w-full py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {isPlatformWithdrawing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ArrowUpRight className="w-3.5 h-3.5" />}
+                <span>SACAR R$ {(platformTotal || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} P/ MERCADO PAGO</span>
+              </button>
+            )}
           </div>
 
           {/* Valores Recebidos */}
@@ -789,36 +810,36 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
         </div>
 
-        {/* 👥 STATUS DE ASSINANTES REAIS INSCRITOS E ATIVOS NO SISTEMA */}
+        {/* 👥 STATUS DA ASSINATURA ATUAL (PARA USUÁRIOS) & MONITORAMENTO GLOBAL (EXCLUSIVO ADMIN MASTER GLOBAL) */}
         <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <Users className="w-5 h-5 text-emerald-500" />
-                <span>Status de Assinantes Reais Inscritos e Ativos no Sistema</span>
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Acompanhamento em tempo real dos assinantes inscritos, planos ativos e conciliação ao vivo com a API do Mercado Pago
-                {realSubscribersStatus?.checkedAt && (
-                  <span className="ml-1.5 font-mono text-[10px] text-slate-400">
-                    (Atualizado às {new Date(realSubscribersStatus.checkedAt).toLocaleTimeString('pt-BR')})
-                  </span>
-                )}
-              </p>
-            </div>
+          {isAdmin && (
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <Users className="w-5 h-5 text-emerald-500" />
+                  <span>Status de Assinantes Reais Inscritos e Ativos no Sistema</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Acompanhamento em tempo real dos assinantes inscritos, planos ativos e conciliação ao vivo com a API do Mercado Pago
+                  {realSubscribersStatus?.checkedAt && (
+                    <span className="ml-1.5 font-mono text-[10px] text-slate-400">
+                      (Atualizado às {new Date(realSubscribersStatus.checkedAt).toLocaleTimeString('pt-BR')})
+                    </span>
+                  )}
+                </p>
+              </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => loadRealSubscribers(true)}
-                disabled={isRefreshingSubscribers}
-                className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshingSubscribers ? 'animate-spin' : ''}`} />
-                <span>{isRefreshingSubscribers ? 'Sincronizando MP...' : 'Atualizar Status ao Vivo'}</span>
-              </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => loadRealSubscribers(true)}
+                  disabled={isRefreshingSubscribers}
+                  className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshingSubscribers ? 'animate-spin' : ''}`} />
+                  <span>{isRefreshingSubscribers ? 'Sincronizando MP...' : 'Atualizar Status ao Vivo'}</span>
+                </button>
 
-              {props.adminUser && (
                 <button
                   type="button"
                   onClick={() => onNavigate('admin')}
@@ -827,9 +848,9 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                   <ShieldCheck className="w-3.5 h-3.5" />
                   <span>Gerenciar Cobranças</span>
                 </button>
-              )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Current Session Active Subscription Strip */}
           <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
@@ -895,6 +916,9 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
             )}
           </div>
 
+          {/* Platform KPI Summary, Filters & Live MP Audit (Exclusivo Admin Master Global) */}
+          {isAdmin && (
+            <>
           {/* Real KPI Summary Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
@@ -1140,6 +1164,8 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
                 </tbody>
               </table>
             </div>
+          )}
+            </>
           )}
         </div>
 

@@ -6,34 +6,52 @@ import confetti from 'canvas-confetti';
 
 interface PushNotificationCenterProps {
   variant?: 'header' | 'floating';
+  isAdminAuthenticated?: boolean;
 }
 
-export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({ variant = 'header' }) => {
+const ADMIN_WITHDRAWAL_NOTIF = {
+  id: 'notif-1',
+  title: 'Mercado Pago & PIX: Saldo Disponível',
+  body: 'O saque imediato de R$ 1.834,80 está disponível para transferência via PIX.',
+  time: 'Agora mesmo'
+};
+
+export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({
+  variant = 'header',
+  isAdminAuthenticated = false,
+}) => {
   const [fcmToken, setFcmToken] = useState<string | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
   const [isOpen, setIsOpen] = useState(false);
-  const [notificationsHistory, setNotificationsHistory] = useState<Array<{ id: string; title: string; body: string; time: string }>>([
-    {
-      id: 'notif-notice-mp-6m',
-      title: 'Comunicado: Erro Checkout Mercado Pago & Planos Reduzidos (6 Meses)',
-      body: 'Cobranças reenviadas devido a erro anterior de compensação no checkout MP (já corrigido). Todos os planos com valor reduzido por 6 meses (a partir de R$ 25,00/mês).',
-      time: 'Comunicado Oficial'
-    },
-    {
-      id: 'notif-1',
-      title: 'Mercado Pago & PIX: Saldo Disponível',
-      body: 'O saque imediato de R$ 1.834,80 está disponível para transferência via PIX.',
-      time: 'Agora mesmo'
-    },
-    {
-      id: 'notif-2',
-      title: 'Nova Oportunidade na Região',
-      body: 'Uma nova obra residencial em sua cidade solicitou orçamento de Mão de Obra.',
-      time: 'Há 15 min'
-    }
-  ]);
+  const [notificationsHistory, setNotificationsHistory] = useState<Array<{ id: string; title: string; body: string; time: string }>>(() => {
+    const base = [
+      {
+        id: 'notif-notice-mp-6m',
+        title: 'Comunicado: Erro Checkout Mercado Pago & Planos Reduzidos (6 Meses)',
+        body: 'Cobranças reenviadas devido a erro anterior de compensação no checkout MP (já corrigido). Todos os planos com valor reduzido por 6 meses (a partir de R$ 25,00/mês).',
+        time: 'Comunicado Oficial'
+      },
+      {
+        id: 'notif-2',
+        title: 'Nova Oportunidade na Região',
+        body: 'Uma nova obra residencial em sua cidade solicitou orçamento de Mão de Obra.',
+        time: 'Há 15 min'
+      }
+    ];
+    return isAdminAuthenticated ? [base[0], ADMIN_WITHDRAWAL_NOTIF, base[1]] : base;
+  });
+
+  useEffect(() => {
+    setNotificationsHistory((prev) => {
+      const withoutAdminNotif = prev.filter((item) => item.id !== ADMIN_WITHDRAWAL_NOTIF.id);
+      if (isAdminAuthenticated) {
+        return [ADMIN_WITHDRAWAL_NOTIF, ...withoutAdminNotif];
+      }
+      return withoutAdminNotif;
+    });
+  }, [isAdminAuthenticated]);
 
   useEffect(() => {
     const saved = localStorage.getItem('maos_em_obra_fcm_token');
@@ -60,6 +78,10 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({ 
       .catch(() => {});
 
     const unsubscribe = onForegroundMessage((payload) => {
+      const combinedText = `${payload.title || ''} ${payload.body || ''}`.toLowerCase();
+      if (!isAdminAuthenticated && (combinedText.includes('saque') || combinedText.includes('1.834') || combinedText.includes('saldo disponível'))) {
+        return;
+      }
       setNotificationsHistory(prev => [
         {
           id: `notif-${Date.now()}`,
@@ -75,7 +97,7 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({ 
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, []);
+  }, [isAdminAuthenticated]);
 
   const handleEnablePush = async () => {
     const token = await requestPushNotificationPermission();

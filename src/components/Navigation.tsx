@@ -48,6 +48,7 @@ interface NavigationProps {
   onRequireAuth?: () => void;
   onOpenInstallModal?: () => void;
   onOpenWithdrawalModal?: () => void;
+  adminWithdrawalAmount?: number;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
@@ -69,6 +70,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   onRequireAuth,
   onOpenInstallModal,
   onOpenWithdrawalModal,
+  adminWithdrawalAmount = 1834.80,
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -456,11 +458,11 @@ export const Navigation: React.FC<NavigationProps> = ({
 
           {/* Right Utility Actions (Stays aligned right on Row 1, desktop stays on far right) */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto lg:order-3">
-            {/* Sacar p/ MP */}
-            {onOpenWithdrawalModal && (
+            {/* Sacar p/ MP (Somente Admin Master Global) */}
+            {isAdminAuthenticated && onOpenWithdrawalModal && (
               <button
                 onClick={onOpenWithdrawalModal}
-                title="Sacar R$ 1.834,80 via PIX p/ Mercado Pago"
+                title={`Sacar R$ ${adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX p/ Mercado Pago`}
                 className="relative flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs font-black bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/20 transition whitespace-nowrap shrink-0 cursor-pointer active:scale-95 border border-emerald-400/50 animate-pulse"
               >
                 <span className="absolute -top-1 -right-1 flex h-3 w-3">
@@ -468,8 +470,12 @@ export const Navigation: React.FC<NavigationProps> = ({
                   <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-400"></span>
                 </span>
                 <Wallet className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
-                <span className="hidden xl:inline">Sacar R$ 1.834,80 p/ MP</span>
-                <span className="hidden sm:inline xl:hidden">Sacar R$ 1.834,80</span>
+                <span className="hidden xl:inline">
+                  Sacar R$ {adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ MP
+                </span>
+                <span className="hidden sm:inline xl:hidden">
+                  Sacar R$ {adminWithdrawalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
                 <span className="sm:hidden">Sacar</span>
               </button>
             )}

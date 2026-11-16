@@ -328,3 +328,22 @@ export async function getWebhookLogs(): Promise<{ success: boolean; logs: any[] 
   return response.json();
 }
 
+export async function testTransparentCheckout1Real(data?: {
+  action?: 'init' | 'simulate_approval';
+  referenceId?: string;
+  payerName?: string;
+  payerEmail?: string;
+  method?: string;
+}): Promise<any> {
+  const response = await fetch('/api/mercadopago/test-checkout-1real', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data || {}),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Erro ao comunicar com serviço de teste de checkout transparente');
+  }
+  return response.json();
+}
+

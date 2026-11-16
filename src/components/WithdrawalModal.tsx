@@ -25,6 +25,7 @@ import confetti from 'canvas-confetti';
 interface WithdrawalModalProps {
   isOpen: boolean;
   onClose: () => void;
+  isAdminAuthenticated?: boolean;
   availableAmount?: number;
   onSuccess?: (withdrawnAmount: number) => void;
 }
@@ -47,6 +48,7 @@ interface AutoTransferItem {
 export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
   isOpen,
   onClose,
+  isAdminAuthenticated = false,
   availableAmount = 1834.80,
   onSuccess,
 }) => {
@@ -113,7 +115,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAdminAuthenticated) return null;
 
   const handleCopyPix = () => {
     navigator.clipboard.writeText(MASTER_CREDENTIALS.pixKey);

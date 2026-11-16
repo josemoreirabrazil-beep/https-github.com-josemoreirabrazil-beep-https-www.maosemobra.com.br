@@ -154,11 +154,14 @@ export const REDUCED_PLAN_PRICES: Record<string, number> = {
   'Anual Construtor': 499.00,
   'Gratuito Lançamento': 0.00,
   'Cadastro Gratuito': 0.00,
+  'Teste Checkout Transparente': 1.00,
+  'Teste Homologação R$ 1,00': 1.00,
 };
 
 export function getReducedPlanPrice(planType?: string, currentAmount?: number): number {
   const normalized = (planType || '').toLowerCase().trim();
   if (!normalized) return Number(currentAmount) || 0;
+  if (normalized.includes('teste') || normalized.includes('1,00') || normalized.includes('1.00')) return 1.00;
   if (normalized.includes('personalizado')) return Number(currentAmount) || 0;
   if (normalized.includes('gratuito') || normalized.includes('isento')) return 0;
   if (normalized.includes('anual')) return 499.00;

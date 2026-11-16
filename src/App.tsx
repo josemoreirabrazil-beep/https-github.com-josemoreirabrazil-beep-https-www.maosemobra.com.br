@@ -57,6 +57,7 @@ import {
   syncEnrolledSubscriberToServer,
   verifyAuthenticatedSubscriberAccess,
   fetchActiveSubscriberNotices,
+  fetchSubscribersCashflow,
   SUBSCRIPTION_UPDATED_EVENT,
   type ActiveSubscriptionState,
   type SubscriberBillingNotice
@@ -131,6 +132,7 @@ export default function App() {
   // Admin Master Global State
   const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
   const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
+  const [adminWithdrawalAmount, setAdminWithdrawalAmount] = useState<number>(1834.80);
 
   // Active Subscription Plan State (Free tier = view opportunities only; Pro = Laudo emission)
   const [activeSubscription, setActiveSubscription] = useState<ActiveSubscriptionState>(() => getActiveUserSubscription());
@@ -235,6 +237,22 @@ export default function App() {
       cancelled = true;
     };
   }, [isAuthResolved, user?.email, adminUser?.token]);
+
+  // Carrega o saldo real da plataforma apenas quando Admin Master Global estiver autenticado
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
+    let cancelled = false;
+    fetchSubscribersCashflow()
+      .then((res) => {
+        if (!cancelled && res?.summary?.totalCollected && res.summary.totalCollected > 0) {
+          setAdminWithdrawalAmount(res.summary.totalCollected);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdminAuthenticated, activeTab]);
 
   // 🚀 Firebase Cloud Messaging Push Notifications Hook
   const { requestPermission, latestNotification } = usePushNotifications();
@@ -396,6 +414,7 @@ export default function App() {
   const handleAdminLogout = () => {
     clearAdminSession();
     setAdminUser(null);
+    setIsWithdrawalModalOpen(false);
     setActiveTab('dashboard');
   };
 
@@ -611,7 +630,8 @@ export default function App() {
         onNavigateToAdmin={() => setActiveTab('admin')}
         onNavigateToReports={() => handleTabChange('reports')}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
-        onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
+        onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
+        adminWithdrawalAmount={isAdminAuthenticated ? adminWithdrawalAmount : undefined}
         onOpenSearchModal={() => setIsSearchModalOpen(true)}
       />
 
@@ -634,7 +654,8 @@ export default function App() {
         onOpenChoosePlanModal={openChoosePlanModal}
         onRequireAuth={handleRequireAuth}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
-        onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
+        onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
+        adminWithdrawalAmount={isAdminAuthenticated ? adminWithdrawalAmount : undefined}
       />
 
       {/* 🔔 Banner de Confirmação Automática de Webhook Mercado Pago */}
@@ -804,7 +825,7 @@ export default function App() {
             isAuthenticated={isAuthenticated}
             adminUser={adminUser}
             activeSubscription={activeSubscription}
-            onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
+            onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
           />
         )}
         
@@ -949,6 +970,7 @@ export default function App() {
             onClearExpenses={handleClearExpenses}
             onBulkSaveExpenses={handleBulkSaveExpenses}
             isAuthenticated={isAuthenticated}
+            isAdminAuthenticated={isAdminAuthenticated}
             onRequireAuth={handleRequireAuth}
           />
         )}
@@ -1017,7 +1039,8 @@ export default function App() {
         onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
         isAdminAuthenticated={!!adminUser}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
-        onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
+        onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
+        adminWithdrawalAmount={isAdminAuthenticated ? adminWithdrawalAmount : undefined}
       />
 
       {/* Floating Quick Download / Install Button */}
@@ -1068,12 +1091,18 @@ export default function App() {
         initialData={currentProject}
       />
 
-      {/* Modal Oficial de Saque R$ 1.834,80 p/ Mercado Pago */}
-      <WithdrawalModal
-        isOpen={isWithdrawalModalOpen}
-        onClose={() => setIsWithdrawalModalOpen(false)}
-        availableAmount={1834.80}
-      />
+      {/* Modal Oficial de Saque p/ Mercado Pago — Exclusivo Admin Master Global */}
+      {isAdminAuthenticated && (
+        <WithdrawalModal
+          isOpen={isWithdrawalModalOpen}
+          onClose={() => setIsWithdrawalModalOpen(false)}
+          isAdminAuthenticated={isAdminAuthenticated}
+          availableAmount={adminWithdrawalAmount}
+          onSuccess={(withdrawnAmount) => {
+            setAdminWithdrawalAmount((prev) => Math.max(0, Number((prev - withdrawnAmount).toFixed(2))));
+          }}
+        />
+      )}
 
       {/* Checkout Mercado Pago para Seleção de Planos (Mensal, Anual Construtoras ou Pro) */}
       <MercadoPagoModal

@@ -60,6 +60,7 @@ interface FinancialViewProps {
   onClearExpenses?: () => void;
   onBulkSaveExpenses?: (expenses: Expense[]) => void;
   isAuthenticated: boolean;
+  isAdminAuthenticated?: boolean;
   onRequireAuth: () => void;
 }
 
@@ -85,6 +86,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   onClearExpenses,
   onBulkSaveExpenses,
   isAuthenticated,
+  isAdminAuthenticated = false,
   onRequireAuth,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -195,6 +197,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   };
 
   const handleSendRevenuesToMercadoPago = async () => {
+    if (!isAdminAuthenticated) return;
     const pendingIncomes = incomeTransactions.filter(e => e.status !== 'Pago');
     const itemsToSend = (pendingIncomes.length > 0 ? pendingIncomes : incomeTransactions).map(e => ({
       title: e.description || 'Receita / Aporte de Obra',
@@ -228,6 +231,7 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   const [transferResultModal, setTransferResultModal] = useState<{ open: boolean; data: any } | null>(null);
 
   const handleTransferAvailableCashToMercadoPago = async () => {
+    if (!isAdminAuthenticated) return;
     const amountToTransfer = availableCash > 0 ? availableCash : totalReceived;
     if (amountToTransfer <= 0) {
       alert('Nenhum valor disponível para transferência imediata no momento.');
@@ -733,39 +737,42 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
             <span>Cobrança Mercado Pago</span>
           </button>
 
-          {/* Send Revenues to Mercado Pago Button */}
-          <button
-            onClick={handleSendRevenuesToMercadoPago}
-            disabled={isSyncingRevenues}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-[#009ee3] hover:from-emerald-700 hover:to-[#0082ba] text-white font-bold rounded-xl text-xs shadow-xs transition"
-            title="Enviar automaticamente as receitas e aportes disponíveis para a conta do Mercado Pago"
-          >
-            {isSyncingRevenues ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <div className="w-4 h-4 rounded-md bg-white text-[#009ee3] flex items-center justify-center font-black text-[9px]">
-                mp
-              </div>
-            )}
-            <span>Enviar Receitas ao MP</span>
-          </button>
+          {/* Admin Master Global: Send Revenues & Transfer Available Cash to Mercado Pago */}
+          {isAdminAuthenticated && (
+            <>
+              <button
+                onClick={handleSendRevenuesToMercadoPago}
+                disabled={isSyncingRevenues}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-[#009ee3] hover:from-emerald-700 hover:to-[#0082ba] text-white font-bold rounded-xl text-xs shadow-xs transition"
+                title="Enviar automaticamente as receitas e aportes disponíveis para a conta do Mercado Pago"
+              >
+                {isSyncingRevenues ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <div className="w-4 h-4 rounded-md bg-white text-[#009ee3] flex items-center justify-center font-black text-[9px]">
+                    mp
+                  </div>
+                )}
+                <span>Enviar Receitas ao MP</span>
+              </button>
 
-          {/* Transfer Available Cash to Mercado Pago via PIX Button */}
-          <button
-            onClick={handleTransferAvailableCashToMercadoPago}
-            disabled={isTransferringPix}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:opacity-95 text-white font-black rounded-xl text-xs shadow-xs transition cursor-pointer disabled:opacity-50"
-            title="Transferir automaticamente todo o saldo disponível via PIX (+55 73998599213) para a conta do Mercado Pago"
-          >
-            {isTransferringPix ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <div className="w-4 h-4 rounded-md bg-white text-emerald-600 flex items-center justify-center font-black text-[9px]">
-                PIX
-              </div>
-            )}
-            <span>Transferir Saldo PIX p/ MP</span>
-          </button>
+              <button
+                onClick={handleTransferAvailableCashToMercadoPago}
+                disabled={isTransferringPix}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-[#009ee3] hover:opacity-95 text-white font-black rounded-xl text-xs shadow-xs transition cursor-pointer disabled:opacity-50"
+                title="Transferir automaticamente todo o saldo disponível via PIX (+55 73998599213) para a conta do Mercado Pago"
+              >
+                {isTransferringPix ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <div className="w-4 h-4 rounded-md bg-white text-emerald-600 flex items-center justify-center font-black text-[9px]">
+                    PIX
+                  </div>
+                )}
+                <span>Transferir Saldo PIX p/ MP</span>
+              </button>
+            </>
+          )}
 
           {/* New Expense Button */}
           <button

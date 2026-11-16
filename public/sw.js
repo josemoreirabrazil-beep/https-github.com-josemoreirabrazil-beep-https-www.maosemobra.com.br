@@ -1,5 +1,5 @@
 // Service Worker for "Mãos em Obra" PWA
-const CACHE_NAME = 'maos-em-obra-v1';
+const CACHE_NAME = 'maos-em-obra-v2';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
@@ -39,23 +39,36 @@ self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
-  // Let API requests pass directly to network
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/')) {
+
+  // CRITICAL: NEVER cache API calls, Vite internals, node_modules, source code or hot reload queries
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.includes('/node_modules/') ||
+    url.pathname.includes('/@') ||
+    url.pathname.includes('.vite') ||
+    url.pathname.endsWith('.ts') ||
+    url.pathname.endsWith('.tsx') ||
+    url.pathname.endsWith('.jsx') ||
+    url.searchParams.has('v') ||
+    url.searchParams.has('t') ||
+    url.hostname === 'localhost' ||
+    url.hostname.includes('ais-dev-')
+  ) {
     return;
+  }
+
+  // Only cache same-origin static assets
+  if (url.origin === self.location.origin) {
+    const isStaticAsset = url.pathname.match(/\.(png|jpg|jpeg|svg|gif|ico|woff2?|ttf|eot)$/i);
+    if (!isStaticAsset && event.request.mode !== 'navigate') {
+      return;
+    }
   }
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Return cached, but also update cache in background
-        fetch(event.request)
-          .then((networkResponse) => {
-            if (networkResponse && networkResponse.status === 200) {
-              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
-            }
-          })
-          .catch(() => {});
         return cachedResponse;
       }
 
