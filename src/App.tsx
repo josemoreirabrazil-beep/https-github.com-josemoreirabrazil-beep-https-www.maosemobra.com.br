@@ -63,6 +63,7 @@ import {
   type SubscriberBillingNotice
 } from './services/subscriberBilling';
 import { usePushNotifications } from './hooks/usePushNotifications';
+import { logBalanceAccessEvent } from './services/balanceAudit';
 import type { Project, DailyLog, Expense, Phase, TeamMember, ServiceRequest, AdminMasterUser, ProjectGoal, TechnicalDocument } from './types';
 import confetti from 'canvas-confetti';
 
@@ -203,6 +204,13 @@ export default function App() {
       setUser(currentUser);
       setIsAuthenticated(!!currentUser && !!getCachedGoogleToken());
       setIsAuthResolved(true);
+      try {
+        if (currentUser?.email) {
+          localStorage.setItem('maos_em_obra_last_user_email', currentUser.email);
+        } else {
+          localStorage.removeItem('maos_em_obra_last_user_email');
+        }
+      } catch {}
     });
     return () => unsubscribe();
   }, []);
@@ -393,8 +401,30 @@ export default function App() {
     if (tab === 'admin') {
       if (adminUser) {
         setActiveTab('admin');
+        logBalanceAccessEvent({
+          type: 'BALANCE_ACCESS_VIEW',
+          severity: 'INFO',
+          action: 'NAVIGATE_ADMIN_MASTER',
+          resource: 'AdminMasterView',
+          details: `Admin Master (${adminUser.email}) acessou o Painel Master Global e funções de saldo.`,
+          authorized: true,
+          amountInvolved: adminWithdrawalAmount,
+          actorEmail: adminUser.email,
+          actorName: adminUser.name,
+          actorRole: 'ADMIN_MASTER',
+        });
       } else {
         setIsAdminLoginModalOpen(true);
+        logBalanceAccessEvent({
+          type: 'BALANCE_ACCESS_DENIED',
+          severity: 'WARNING',
+          action: 'ADMIN_PANEL_ACCESS_ATTEMPT',
+          resource: 'AdminMasterView',
+          details: `Tentativa de acesso ao Painel Admin Master Global sem autenticação Master (${user?.email || 'Visitante'}). Modal de login exibido.`,
+          authorized: false,
+          actorEmail: user?.email || null,
+          actorName: user?.displayName || null,
+        });
       }
     } else {
       setActiveTab(tab);
@@ -403,10 +433,51 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const openWithdrawalModalWithAudit = (source: string) => {
+    if (!isAdminAuthenticated || !adminUser) {
+      logBalanceAccessEvent({
+        type: 'BALANCE_ACCESS_DENIED',
+        severity: 'CRITICAL',
+        action: 'OPEN_WITHDRAWAL_MODAL_BLOCKED',
+        resource: `WithdrawalModal (${source})`,
+        details: `Tentativa bloqueada de abrir o modal de saque a partir de "${source}" por usuário sem privilégio Admin Master (${user?.email || 'Visitante'}).`,
+        authorized: false,
+        actorEmail: user?.email || null,
+        actorName: user?.displayName || null,
+      });
+      return;
+    }
+
+    logBalanceAccessEvent({
+      type: 'BALANCE_ACCESS_VIEW',
+      severity: 'INFO',
+      action: 'OPEN_WITHDRAWAL_MODAL',
+      resource: `WithdrawalModal (${source})`,
+      details: `Admin Master (${adminUser.email}) abriu o modal de saque e histórico PIX via ${source} (Saldo: R$ ${adminWithdrawalAmount.toFixed(2)}).`,
+      authorized: true,
+      amountInvolved: adminWithdrawalAmount,
+      actorEmail: adminUser.email,
+      actorName: adminUser.name,
+      actorRole: 'ADMIN_MASTER',
+    });
+    setIsWithdrawalModalOpen(true);
+  };
+
   // Admin Login Success Handler
   const handleAdminLoginSuccess = (userMaster: AdminMasterUser) => {
     setAdminUser(userMaster);
     setActiveTab('admin');
+    logBalanceAccessEvent({
+      type: 'BALANCE_ACCESS_VIEW',
+      severity: 'INFO',
+      action: 'ADMIN_MASTER_AUTHENTICATED',
+      resource: 'AdminMasterView > Saldo & Segurança',
+      details: `Admin Master Global (${userMaster.email}) autenticado e liberado para funções de saldo e auditoria.`,
+      authorized: true,
+      actorEmail: userMaster.email,
+      actorName: userMaster.name,
+      actorRole: 'ADMIN_MASTER',
+    });
     confetti({ particleCount: 60, spread: 70 });
   };
 
@@ -630,7 +701,7 @@ export default function App() {
         onNavigateToAdmin={() => setActiveTab('admin')}
         onNavigateToReports={() => handleTabChange('reports')}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
-        onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
+        onOpenWithdrawalModal={isAdminAuthenticated ? () => openWithdrawalModalWithAudit('Header') : undefined}
         adminWithdrawalAmount={isAdminAuthenticated ? adminWithdrawalAmount : undefined}
         onOpenSearchModal={() => setIsSearchModalOpen(true)}
       />
@@ -654,7 +725,7 @@ export default function App() {
         onOpenChoosePlanModal={openChoosePlanModal}
         onRequireAuth={handleRequireAuth}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
-        onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
+        onOpenWithdrawalModal={isAdminAuthenticated ? () => openWithdrawalModalWithAudit('Navigation') : undefined}
         adminWithdrawalAmount={isAdminAuthenticated ? adminWithdrawalAmount : undefined}
       />
 
@@ -825,7 +896,7 @@ export default function App() {
             isAuthenticated={isAuthenticated}
             adminUser={adminUser}
             activeSubscription={activeSubscription}
-            onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
+            onOpenWithdrawalModal={isAdminAuthenticated ? () => openWithdrawalModalWithAudit('DashboardView') : undefined}
           />
         )}
         
@@ -1039,7 +1110,7 @@ export default function App() {
         onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
         isAdminAuthenticated={!!adminUser}
         onOpenInstallModal={() => setIsInstallModalOpen(true)}
-        onOpenWithdrawalModal={isAdminAuthenticated ? () => setIsWithdrawalModalOpen(true) : undefined}
+        onOpenWithdrawalModal={isAdminAuthenticated ? () => openWithdrawalModalWithAudit('Footer') : undefined}
         adminWithdrawalAmount={isAdminAuthenticated ? adminWithdrawalAmount : undefined}
       />
 

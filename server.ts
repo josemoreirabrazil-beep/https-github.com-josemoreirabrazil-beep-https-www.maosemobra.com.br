@@ -54,6 +54,13 @@ const auditLogs: Array<{
   ip: string;
   userAgent?: string;
   details: string;
+  actorEmail?: string;
+  actorName?: string;
+  actorRole?: string;
+  action?: string;
+  resource?: string;
+  authorized?: boolean;
+  amountInvolved?: number;
 }> = [
   {
     id: `log-${Date.now()}-1`,
@@ -61,22 +68,49 @@ const auditLogs: Array<{
     type: 'SECURITY_SCAN',
     severity: 'INFO',
     ip: '127.0.0.1',
-    details: 'Blindagem de Segurança de Ponta a Ponta Inicializada (WAF + Anti-BruteForce + RateLimiter + Headers)',
+    details: 'Blindagem de Segurança de Ponta a Ponta Inicializada (WAF + Anti-BruteForce + RateLimiter + Headers + Auditoria de Saldo)',
+    actorEmail: 'system@maosemobra.com.br',
+    actorName: 'Sistema Mãos em Obra',
+    actorRole: 'SYSTEM',
+    action: 'SYSTEM_INIT',
+    resource: 'SecurityShield',
+    authorized: true,
   }
 ];
 
-function recordAuditLog(type: string, severity: 'INFO' | 'WARNING' | 'ALERT' | 'CRITICAL', ip: string, details: string, userAgent?: string) {
+interface AuditLogMetadata {
+  actorEmail?: string;
+  actorName?: string;
+  actorRole?: string;
+  action?: string;
+  resource?: string;
+  authorized?: boolean;
+  amountInvolved?: number;
+}
+
+const lastPollAuditMap = new Map<string, number>();
+
+function recordAuditLog(
+  type: string,
+  severity: 'INFO' | 'WARNING' | 'ALERT' | 'CRITICAL',
+  ip: string,
+  details: string,
+  userAgent?: string,
+  meta?: AuditLogMetadata
+) {
   const log = {
     id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     timestamp: new Date().toISOString(),
     type,
     severity,
     ip: ip || '127.0.0.1',
-    userAgent: userAgent ? userAgent.substring(0, 100) : undefined,
+    userAgent: userAgent ? userAgent.substring(0, 120) : undefined,
     details,
+    ...(meta || {}),
   };
   auditLogs.unshift(log);
-  if (auditLogs.length > 200) auditLogs.pop();
+  if (auditLogs.length > 500) auditLogs.pop();
+  return log;
 }
 
 // Generate Secure Cryptographic Session Token
@@ -416,10 +450,124 @@ app.post('/api/admin/system-shield-toggle', (req, res) => {
 
 // Log custom admin/security events
 app.post('/api/admin/log-event', (req, res) => {
-  const { type, severity, details } = req.body;
+  const { type, severity, details, actorEmail, actorName, actorRole, action, resource, authorized, amountInvolved } = req.body;
   const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
-  recordAuditLog(type || 'SECURITY_SCAN', severity || 'INFO', clientIp, details || 'Evento registrado');
+  recordAuditLog(
+    type || 'SECURITY_SCAN',
+    severity || 'INFO',
+    clientIp,
+    details || 'Evento registrado',
+    req.headers['user-agent'],
+    { actorEmail, actorName, actorRole, action, resource, authorized, amountInvolved }
+  );
   res.json({ success: true });
+});
+
+// Dedicated Balance & Sensitive Data Access Audit Endpoint (records all interactions & unauthorized attempts)
+app.post('/api/audit/balance-access', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+  const isMaster = Boolean(token && verifyMasterToken(token));
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+  const userAgent = req.headers['user-agent'];
+
+  const {
+    type,
+    severity,
+    action,
+    resource,
+    details,
+    authorized,
+    amountInvolved,
+    actorEmail,
+    actorName,
+    actorRole,
+  } = req.body || {};
+
+  const effectiveAuthorized = typeof authorized === 'boolean' ? (authorized && (isMaster || actorRole !== 'ADMIN_MASTER' ? authorized : true)) : isMaster;
+  const resolvedType =
+    type ||
+    (effectiveAuthorized ? 'BALANCE_ACCESS_VIEW' : 'BALANCE_ACCESS_DENIED');
+  const resolvedSeverity =
+    severity || (effectiveAuthorized ? 'INFO' : 'CRITICAL');
+
+  const created = recordAuditLog(
+    resolvedType,
+    resolvedSeverity,
+    clientIp,
+    details || `Tentativa de acesso às funções de saldo (${action || 'VIEW'}) em ${resource || 'Sistema'}`,
+    userAgent,
+    {
+      actorEmail: actorEmail || (isMaster ? MASTER_EMAIL : 'visitante@anonimo'),
+      actorName: actorName || (isMaster ? MASTER_NAME : 'Usuário/Visitante'),
+      actorRole: actorRole || (isMaster ? 'ADMIN_MASTER' : 'VISITOR'),
+      action: action || 'ACCESS_BALANCE_FUNCTION',
+      resource: resource || 'Funções de Saldo',
+      authorized: effectiveAuthorized,
+      amountInvolved: typeof amountInvolved === 'number' ? Number(amountInvolved.toFixed(2)) : undefined,
+    }
+  );
+
+  res.json({ success: true, log: created });
+});
+
+// Dedicated Balance Audit Logs Endpoint for Admin Master Global
+app.get('/api/admin/balance-audit-logs', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+
+  if (!token || !verifyMasterToken(token)) {
+    const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+    recordAuditLog(
+      'BALANCE_ACCESS_DENIED',
+      'CRITICAL',
+      clientIp,
+      'Tentativa não autorizada de consultar logs de auditoria de saldo bloqueada.',
+      req.headers['user-agent'],
+      {
+        actorEmail: 'desconhecido',
+        actorName: 'Acesso Não Autenticado',
+        actorRole: 'VISITOR',
+        action: 'FETCH_BALANCE_AUDIT_LOGS',
+        resource: '/api/admin/balance-audit-logs',
+        authorized: false,
+      }
+    );
+    return res.status(401).json({ error: 'Acesso negado aos logs de auditoria de saldo.' });
+  }
+
+  const balanceTypes = new Set([
+    'BALANCE_ACCESS_VIEW',
+    'BALANCE_WITHDRAW_ATTEMPT',
+    'BALANCE_ACCESS_DENIED',
+    'PIX_AUTO_TRANSFER',
+    'SENSITIVE_DATA_VIEW',
+  ]);
+  const balanceLogs = auditLogs.filter((l) => balanceTypes.has(l.type));
+
+  const authorizedViews = balanceLogs.filter(
+    (l) => l.authorized !== false && (l.type === 'BALANCE_ACCESS_VIEW' || l.type === 'SENSITIVE_DATA_VIEW')
+  ).length;
+  const withdrawalAttempts = balanceLogs.filter(
+    (l) => l.type === 'BALANCE_WITHDRAW_ATTEMPT' || l.type === 'PIX_AUTO_TRANSFER'
+  ).length;
+  const deniedAttempts = balanceLogs.filter(
+    (l) => l.type === 'BALANCE_ACCESS_DENIED' || l.authorized === false
+  ).length;
+  const latest = balanceLogs[0];
+
+  res.json({
+    success: true,
+    logs: balanceLogs,
+    summary: {
+      totalBalanceEvents: balanceLogs.length,
+      authorizedViews,
+      withdrawalAttempts,
+      deniedAttempts,
+      lastAccessAt: latest?.timestamp || null,
+      lastActor: latest?.actorEmail || latest?.actorName || null,
+    },
+  });
 });
 
 // ==========================================
@@ -2733,6 +2881,7 @@ app.get('/api/admin/subscribers-cashflow', (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
   const isMaster = Boolean(token && verifyMasterToken(token));
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
 
   const approved = subscriberPayments.filter(p => p.status === 'Aprovado');
   const pending = subscriberPayments.filter(p => p.status === 'Pendente' || p.status === 'Atrasado');
@@ -2751,6 +2900,62 @@ app.get('/api/admin/subscribers-cashflow', (req, res) => {
   const payingSubscribersCount = subscriberPayments.filter(p => p.planType !== 'Gratuito Lançamento' && p.status !== 'Isento / Cortesia').length;
   const totalPendingPeriodsCount = pending.reduce((acc, curr) => acc + (Number(curr.periodsCount) || 1), 0);
 
+  if (!isMaster) {
+    recordAuditLog(
+      'BALANCE_ACCESS_DENIED',
+      'CRITICAL',
+      clientIp,
+      'Tentativa sem autorização Admin Master de consultar fluxo de caixa/saldo (/api/admin/subscribers-cashflow) foi bloqueada e ocultada.',
+      req.headers['user-agent'],
+      {
+        actorEmail: 'nao-autenticado',
+        actorName: 'Usuário/Assinante Sem Token Master',
+        actorRole: 'USER',
+        action: 'UNAUTHORIZED_CASHFLOW_API',
+        resource: '/api/admin/subscribers-cashflow',
+        authorized: false,
+      }
+    );
+    return res.json({
+      summary: {
+        totalCollected: 0,
+        pendingAmount: 0,
+        monthlyRecurringRevenue: 0,
+        totalSubscribers: 0,
+        activePaidSubscribers: 0,
+        freeTierSubscribers: 0,
+        overdueSubscribers: 0,
+        payingSubscribersCount: 0,
+        totalPendingPeriodsCount: 0,
+      },
+      payments: [],
+    });
+  }
+
+  // Throttle repeated background polling entries (log at most once per 60s per IP for read polling)
+  const pollKey = `cashflow:${clientIp}`;
+  const now = Date.now();
+  const lastLogged = lastPollAuditMap.get(pollKey) || 0;
+  if (now - lastLogged > 60000) {
+    lastPollAuditMap.set(pollKey, now);
+    recordAuditLog(
+      'BALANCE_ACCESS_VIEW',
+      'INFO',
+      clientIp,
+      `Admin Master Global consultou saldo e fluxo de caixa consolidado (Saldo: R$ ${totalCollected.toFixed(2)}).`,
+      req.headers['user-agent'],
+      {
+        actorEmail: MASTER_EMAIL,
+        actorName: MASTER_NAME,
+        actorRole: 'ADMIN_MASTER',
+        action: 'API_VIEW_CASHFLOW',
+        resource: '/api/admin/subscribers-cashflow',
+        authorized: true,
+        amountInvolved: Number(totalCollected.toFixed(2)),
+      }
+    );
+  }
+
   res.json({
     summary: {
       totalCollected: Number(totalCollected.toFixed(2)),
@@ -2763,7 +2968,7 @@ app.get('/api/admin/subscribers-cashflow', (req, res) => {
       payingSubscribersCount,
       totalPendingPeriodsCount,
     },
-    payments: isMaster ? subscriberPayments : [],
+    payments: subscriberPayments,
   });
 });
 
@@ -3301,6 +3506,41 @@ app.get('/api/subscribers/real-status', async (req, res) => {
   const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
   const isMaster = Boolean(token && verifyMasterToken(token));
   const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+
+  if (!isMaster) {
+    recordAuditLog(
+      'BALANCE_ACCESS_DENIED',
+      'WARNING',
+      clientIp,
+      'Tentativa direta de acesso a auditoria de assinantes/MP (/api/subscribers/real-status) sem credencial Admin Master.',
+      req.headers['user-agent'],
+      {
+        actorEmail: 'nao-autenticado',
+        actorName: 'Acesso Sem Token Master',
+        actorRole: 'USER',
+        action: 'UNAUTHORIZED_MP_AUDIT_API',
+        resource: '/api/subscribers/real-status',
+        authorized: false,
+      }
+    );
+  } else if (forceRefresh) {
+    recordAuditLog(
+      'SENSITIVE_DATA_VIEW',
+      'INFO',
+      clientIp,
+      'Admin Master executou sincronização manual ao vivo com a API do Mercado Pago e lista de assinantes.',
+      req.headers['user-agent'],
+      {
+        actorEmail: MASTER_EMAIL,
+        actorName: MASTER_NAME,
+        actorRole: 'ADMIN_MASTER',
+        action: 'SYNC_LIVE_MP_AUDIT',
+        resource: '/api/subscribers/real-status',
+        authorized: true,
+      }
+    );
+  }
 
   const mpAudit = await syncLiveMercadoPagoState(forceRefresh);
 
@@ -5230,9 +5470,31 @@ app.get('/api/mercadopago/payment-status/:ref', (req, res) => {
 
 // Mercado Pago: Transfer all available balance automatically via PIX key to Mercado Pago account
 app.post('/api/mercadopago/transfer-pix', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+  const isMaster = Boolean(token && verifyMasterToken(token));
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+
   try {
     const { amount, projectName } = req.body;
     const transferAmount = Number(amount) || 0;
+
+    recordAuditLog(
+      'BALANCE_WITHDRAW_ATTEMPT',
+      isMaster ? 'WARNING' : 'CRITICAL',
+      clientIp,
+      `Solicitação de saque PIX de R$ ${transferAmount.toFixed(2)} (${projectName || 'Saque Manual'}) ${isMaster ? 'autorizada pelo Admin Master' : 'sem token Master explícito'}.`,
+      req.headers['user-agent'],
+      {
+        actorEmail: isMaster ? MASTER_EMAIL : 'desconhecido',
+        actorName: isMaster ? MASTER_NAME : 'Origem Externa/Sem Token',
+        actorRole: isMaster ? 'ADMIN_MASTER' : 'UNKNOWN',
+        action: 'INITIATE_PIX_WITHDRAWAL',
+        resource: projectName || '/api/mercadopago/transfer-pix',
+        authorized: isMaster,
+        amountInvolved: transferAmount,
+      }
+    );
 
     if (transferAmount <= 0) {
       return res.status(400).json({ error: 'Nenhum valor disponível para transferência imediata.' });
@@ -5261,9 +5523,31 @@ app.post('/api/mercadopago/transfer-pix', async (req, res) => {
 
 // Mercado Pago: Immediate Auto-Sweep of Available Balance
 app.post('/api/mercadopago/auto-sweep', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+  const isMaster = Boolean(token && verifyMasterToken(token));
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+
   try {
     const { amount, reason } = req.body;
     const sweepAmount = Number(amount) || 1834.80;
+
+    recordAuditLog(
+      'BALANCE_WITHDRAW_ATTEMPT',
+      isMaster ? 'WARNING' : 'CRITICAL',
+      clientIp,
+      `Varredura automática (Auto-Sweep PIX) de R$ ${sweepAmount.toFixed(2)} disparada (${reason || 'Auto-Sweep'}).`,
+      req.headers['user-agent'],
+      {
+        actorEmail: isMaster ? MASTER_EMAIL : 'desconhecido',
+        actorName: isMaster ? MASTER_NAME : 'Origem Externa/Sem Token',
+        actorRole: isMaster ? 'ADMIN_MASTER' : 'UNKNOWN',
+        action: 'INITIATE_AUTO_SWEEP',
+        resource: reason || '/api/mercadopago/auto-sweep',
+        authorized: isMaster,
+        amountInvolved: sweepAmount,
+      }
+    );
 
     if (sweepAmount <= 0) {
       return res.status(400).json({ error: 'Valor inválido para varredura.' });
@@ -5286,7 +5570,31 @@ app.post('/api/mercadopago/auto-sweep', async (req, res) => {
 
 // Mercado Pago: Get History of Automatic PIX Transfers
 app.get('/api/mercadopago/auto-transfers-history', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
+  const isMaster = Boolean(token && verifyMasterToken(token));
+  const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
+
   const totalTransferred = autoTransfersHistory.reduce((sum, item) => sum + item.amount, 0);
+
+  if (!isMaster) {
+    recordAuditLog(
+      'BALANCE_ACCESS_DENIED',
+      'WARNING',
+      clientIp,
+      'Tentativa de leitura do histórico de auto-transferências PIX sem credencial Admin Master.',
+      req.headers['user-agent'],
+      {
+        actorEmail: 'nao-autenticado',
+        actorName: 'Consulta Sem Token Master',
+        actorRole: 'USER',
+        action: 'UNAUTHORIZED_TRANSFER_HISTORY_API',
+        resource: '/api/mercadopago/auto-transfers-history',
+        authorized: false,
+      }
+    );
+  }
+
   return res.json({
     enabled: autoWithdrawEnabled,
     targetPixKey: '+55 (73) 99859-9213',

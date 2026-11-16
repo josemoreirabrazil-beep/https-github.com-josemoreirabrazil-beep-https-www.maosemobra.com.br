@@ -18,7 +18,8 @@ import {
   Zap,
   CheckCheck
 } from 'lucide-react';
-import { MASTER_CREDENTIALS } from '../services/adminAuth';
+import { MASTER_CREDENTIALS, getCachedAdminSession } from '../services/adminAuth';
+import { logBalanceAccessEvent } from '../services/balanceAudit';
 import { generateQrCodeDataUrl } from '../utils/pix';
 import confetti from 'canvas-confetti';
 
@@ -82,12 +83,23 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
 
   // Fetch history and generate QR Code when receipt changes
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isAdminAuthenticated) {
+      logBalanceAccessEvent({
+        type: 'BALANCE_ACCESS_DENIED',
+        severity: 'CRITICAL',
+        action: 'RENDER_WITHDRAWAL_MODAL_BLOCKED',
+        resource: 'WithdrawalModal',
+        details: 'Tentativa bloqueada de renderizar WithdrawalModal sem autenticação Admin Master Global.',
+        authorized: false,
+      });
+      return;
+    }
+    if (isOpen && isAdminAuthenticated) {
       loadHistory();
       setAmount(availableAmount || 1834.80);
       setErrorMsg(null);
     }
-  }, [isOpen, availableAmount]);
+  }, [isOpen, isAdminAuthenticated, availableAmount]);
 
   useEffect(() => {
     if (receipt?.qrCode) {
@@ -100,7 +112,11 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
   const loadHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch('/api/mercadopago/auto-transfers-history');
+      const token = getCachedAdminSession()?.token;
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch('/api/mercadopago/auto-transfers-history', { headers });
       if (res.ok) {
         const data = await res.json();
         setHistoryList(data.history || []);
@@ -133,15 +149,31 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
 
   // Immediate Auto-Sweep of available balance
   const handleAutoSweep = async () => {
+    const sweepAmt = amount > 0 ? amount : availableAmount || 1834.80;
+    logBalanceAccessEvent({
+      type: 'BALANCE_WITHDRAW_ATTEMPT',
+      severity: 'WARNING',
+      action: 'SUBMIT_AUTO_SWEEP',
+      resource: 'WithdrawalModal > Auto-Sweep PIX',
+      details: `Admin Master iniciou varredura automática de saldo (R$ ${sweepAmt.toFixed(2)}) via PIX para Mercado Pago.`,
+      authorized: true,
+      amountInvolved: sweepAmt,
+      actorRole: 'ADMIN_MASTER',
+    });
+
     setIsSweeping(true);
     setErrorMsg(null);
 
     try {
+      const token = getCachedAdminSession()?.token;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch('/api/mercadopago/auto-sweep', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
-          amount: amount > 0 ? amount : availableAmount || 1834.80,
+          amount: sweepAmt,
           reason: 'Varredura Automática Imediata de Saldo Disponível (Auto-Sweep PIX/QR Code)',
         }),
       });
@@ -206,13 +238,28 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
       return;
     }
 
+    logBalanceAccessEvent({
+      type: 'BALANCE_WITHDRAW_ATTEMPT',
+      severity: 'WARNING',
+      action: 'SUBMIT_MANUAL_PIX_WITHDRAWAL',
+      resource: 'WithdrawalModal > Saque PIX',
+      details: `Admin Master confirmou solicitação de saque manual de R$ ${amount.toFixed(2)} via PIX (${MASTER_CREDENTIALS.pixKey}).`,
+      authorized: true,
+      amountInvolved: amount,
+      actorRole: 'ADMIN_MASTER',
+    });
+
     setIsWithdrawing(true);
     setErrorMsg(null);
 
     try {
+      const token = getCachedAdminSession()?.token;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch('/api/mercadopago/transfer-pix', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           amount,
           projectName: 'Saque Plataforma Mãos em Obra',
@@ -332,6 +379,15 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
               onClick={() => {
                 setActiveTab('history');
                 loadHistory();
+                logBalanceAccessEvent({
+                  type: 'SENSITIVE_DATA_VIEW',
+                  severity: 'INFO',
+                  action: 'VIEW_TRANSFER_HISTORY',
+                  resource: 'WithdrawalModal > Histórico',
+                  details: 'Admin Master consultou o histórico de auto-transferências PIX no modal de saque.',
+                  authorized: true,
+                  actorRole: 'ADMIN_MASTER',
+                });
               }}
               className={`flex-1 py-3 text-xs font-bold flex items-center justify-center gap-2 border-b-2 transition cursor-pointer ${
                 activeTab === 'history'

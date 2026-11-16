@@ -58,6 +58,7 @@ import {
   type ActiveSubscriptionState
 } from '../services/subscriberBilling';
 import { MASTER_CREDENTIALS } from '../services/adminAuth';
+import { logBalanceAccessEvent } from '../services/balanceAudit';
 import confetti from 'canvas-confetti';
 
 interface DashboardViewProps {
@@ -120,6 +121,19 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
   const loadRealSubscribers = React.useCallback(async (forceRefresh = false) => {
     if (!isAdmin) return;
+    if (forceRefresh) {
+      logBalanceAccessEvent({
+        type: 'SENSITIVE_DATA_VIEW',
+        severity: 'INFO',
+        action: 'DASHBOARD_SYNC_LIVE_MP',
+        resource: 'DashboardView > Auditoria MP ao Vivo',
+        details: 'Admin Master sincronizou os dados ao vivo de assinantes e pagamentos do Mercado Pago no Dashboard.',
+        authorized: true,
+        actorEmail: props.adminUser?.email,
+        actorName: props.adminUser?.name,
+        actorRole: 'ADMIN_MASTER',
+      });
+    }
     setIsRefreshingSubscribers(true);
     try {
       const snapshot = await fetchRealSubscribersStatus(forceRefresh);
@@ -129,7 +143,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
     } finally {
       setIsRefreshingSubscribers(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, props.adminUser]);
 
   React.useEffect(() => {
     fetchSubscriptionPlans().then(plans => {
@@ -155,7 +169,19 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   }, [isAdmin, loadRealSubscribers]);
 
   const handlePlatformWithdrawal = async () => {
-    if (!isAdmin) return;
+    if (!isAdmin) {
+      logBalanceAccessEvent({
+        type: 'BALANCE_ACCESS_DENIED',
+        severity: 'CRITICAL',
+        action: 'DASHBOARD_WITHDRAW_BLOCKED',
+        resource: 'DashboardView',
+        details: 'Tentativa bloqueada de acionar saque direto no DashboardView sem sessão Admin Master.',
+        authorized: false,
+        actorEmail: user?.email || null,
+        actorName: user?.displayName || null,
+      });
+      return;
+    }
     if (platformTotal <= 0) {
       alert('Nenhum valor disponível para saque no caixa da plataforma.');
       return;
@@ -165,11 +191,27 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
       return;
     }
 
+    logBalanceAccessEvent({
+      type: 'BALANCE_WITHDRAW_ATTEMPT',
+      severity: 'WARNING',
+      action: 'DASHBOARD_DIRECT_WITHDRAW',
+      resource: 'DashboardView > Saque Direto',
+      details: `Admin Master (${props.adminUser?.email}) acionou saque direto de R$ ${platformTotal.toFixed(2)} via PIX no Dashboard.`,
+      authorized: true,
+      amountInvolved: platformTotal,
+      actorEmail: props.adminUser?.email,
+      actorName: props.adminUser?.name,
+      actorRole: 'ADMIN_MASTER',
+    });
+
     setIsPlatformWithdrawing(true);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (props.adminUser?.token) headers['Authorization'] = `Bearer ${props.adminUser.token}`;
+
       const response = await fetch('/api/mercadopago/transfer-pix', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           amount: platformTotal,
           projectName: 'Saque Direto Dashboard - Mãos em Obra',

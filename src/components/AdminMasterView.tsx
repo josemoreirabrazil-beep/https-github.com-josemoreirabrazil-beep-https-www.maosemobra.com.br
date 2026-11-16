@@ -51,7 +51,9 @@ import {
   Briefcase,
   Send,
   FileCheck2,
-  Plug
+  Plug,
+  Eye,
+  Ban
 } from 'lucide-react';
 import type { 
   Project, 
@@ -97,6 +99,12 @@ import { MercadoPagoModal } from './MercadoPagoModal';
 import { FiscalNfseManager } from './FiscalNfseManager';
 import { FiscalAutomationModule } from './FiscalAutomationModule';
 import { BatchInvitationsView } from './BatchInvitationsView';
+import {
+  fetchBalanceAuditLogs,
+  logBalanceAccessEvent,
+  computeBalanceAuditSummary,
+  type BalanceAuditSummary
+} from '../services/balanceAudit';
 import confetti from 'canvas-confetti';
 
 interface AdminMasterViewProps {
@@ -129,7 +137,16 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const [shieldStatus, setShieldStatus] = useState<SecurityShieldStatus | null>(null);
   const [auditLogs, setAuditLogs] = useState<SecurityAuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [logFilter, setLogFilter] = useState<'ALL' | 'CRITICAL' | 'WARNING' | 'INFO'>('ALL');
+  const [logCategoryFilter, setLogCategoryFilter] = useState<'ALL' | 'BALANCE' | 'WITHDRAWALS' | 'DENIED' | 'CRITICAL' | 'INFO'>('ALL');
+  const [logSearchTerm, setLogSearchTerm] = useState('');
+  const [balanceAuditSummary, setBalanceAuditSummary] = useState<BalanceAuditSummary>({
+    totalBalanceEvents: 0,
+    authorizedViews: 0,
+    withdrawalAttempts: 0,
+    deniedAttempts: 0,
+    lastAccessAt: null,
+    lastActor: null,
+  });
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -295,6 +312,17 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       const data = await response.json();
       if (data.success) {
         setAutoWithdrawEnabled(data.enabled);
+        logBalanceAccessEvent({
+          type: 'BALANCE_WITHDRAW_ATTEMPT',
+          severity: 'WARNING',
+          action: 'TOGGLE_AUTO_WITHDRAW',
+          resource: 'AdminMasterView > Transferência Automática PIX',
+          details: `Admin Master (${adminUser.email}) ${data.enabled ? 'ATIVOU' : 'DESATIVOU'} a transferência automática imediata via PIX p/ Mercado Pago.`,
+          authorized: true,
+          actorEmail: adminUser.email,
+          actorName: adminUser.name,
+          actorRole: 'ADMIN_MASTER',
+        });
         confetti({ particleCount: 20, spread: 30 });
       }
     } catch (err) {
@@ -307,10 +335,27 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
     setIsWithdrawing(true);
     setWithdrawalResultModal(null);
+
+    logBalanceAccessEvent({
+      type: 'BALANCE_WITHDRAW_ATTEMPT',
+      severity: 'WARNING',
+      action: 'ADMIN_PANEL_AUTO_SWEEP',
+      resource: 'AdminMasterView > Sacar p/ Mercado Pago',
+      details: `Admin Master (${adminUser.email}) solicitou saque imediato via PIX no valor de R$ ${amountToWithdraw.toFixed(2)}.`,
+      authorized: true,
+      amountInvolved: amountToWithdraw,
+      actorEmail: adminUser.email,
+      actorName: adminUser.name,
+      actorRole: 'ADMIN_MASTER',
+    });
+
     try {
       const response = await fetch('/api/mercadopago/auto-sweep', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminUser.token}`,
+        },
         body: JSON.stringify({
           amount: amountToWithdraw,
           reason: 'Caixa Admin Master - Mãos em Obra (Auto-Sweep Imediato)',
@@ -347,8 +392,44 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
     }
   };
 
+  const handleChangeSubTab = (
+    tab: 'cashflow' | 'fiscal' | 'fiscal_config' | 'shield' | 'database' | 'logs' | 'users' | 'prospec' | 'invitations'
+  ) => {
+    setActiveSubTab(tab);
+    if (tab === 'cashflow' || tab === 'logs' || tab === 'users') {
+      const resourceLabel =
+        tab === 'cashflow'
+          ? 'AdminMasterView > Aba Caixa & Saques'
+          : tab === 'logs'
+          ? 'AdminMasterView > Aba Auditoria de Acessos'
+          : 'AdminMasterView > Aba Visão Geral de Assinantes';
+      logBalanceAccessEvent({
+        type: 'BALANCE_ACCESS_VIEW',
+        severity: 'INFO',
+        action: `SWITCH_TAB_${tab.toUpperCase()}`,
+        resource: resourceLabel,
+        details: `Admin Master (${adminUser.email}) acessou a aba ${resourceLabel}.`,
+        authorized: true,
+        actorEmail: adminUser.email,
+        actorName: adminUser.name,
+        actorRole: 'ADMIN_MASTER',
+      });
+    }
+  };
+
   // Load status, logs, and subscribers billing on mount
   useEffect(() => {
+    logBalanceAccessEvent({
+      type: 'BALANCE_ACCESS_VIEW',
+      severity: 'INFO',
+      action: 'OPEN_ADMIN_MASTER_VIEW',
+      resource: 'AdminMasterView > Monitor de Pagamentos & Auditoria',
+      details: `Admin Master (${adminUser.email}) abriu o painel global com acesso aos saldos, caixa dos assinantes e auditoria.`,
+      authorized: true,
+      actorEmail: adminUser.email,
+      actorName: adminUser.name,
+      actorRole: 'ADMIN_MASTER',
+    });
     loadAllAdminData();
     const interval = setInterval(() => {
       loadAllAdminData(false);
@@ -359,9 +440,10 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   const loadAllAdminData = async (showLoading = true) => {
     if (showLoading) setIsLoading(true);
     try {
-      const [status, logs, cashflow, plans, autoConfigRes] = await Promise.all([
+      const [status, logs, balanceAuditRes, cashflow, plans, autoConfigRes] = await Promise.all([
         fetchSecurityStatus(),
         fetchAuditLogs(adminUser.token),
+        fetchBalanceAuditLogs(adminUser.token),
         fetchSubscribersCashflow(),
         fetchSubscriptionPlans(),
         fetch('/api/admin/auto-withdraw-config', {
@@ -369,7 +451,17 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         }).then(r => r.json())
       ]);
       setShieldStatus(status);
-      setAuditLogs(logs);
+      const mergedMap = new Map<string, SecurityAuditLog>();
+      for (const item of [...(balanceAuditRes?.logs || []), ...(logs || [])]) {
+        if (!mergedMap.has(item.id)) {
+          mergedMap.set(item.id, item);
+        }
+      }
+      const mergedLogs = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      setAuditLogs(mergedLogs);
+      setBalanceAuditSummary(computeBalanceAuditSummary(mergedLogs));
       if (cashflow) {
         setSubscriberPayments(cashflow.payments || []);
         setCashflowSummary(cashflow.summary);
@@ -544,6 +636,19 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
   // Export Cashflow CSV
   const handleExportCashflowCSV = () => {
+    logBalanceAccessEvent({
+      type: 'SENSITIVE_DATA_VIEW',
+      severity: 'INFO',
+      action: 'EXPORT_CASHFLOW_CSV',
+      resource: 'AdminMasterView > CSV Caixa Assinantes',
+      details: `Admin Master (${adminUser.email}) exportou relatório financeiro CSV (${subscriberPayments.length} assinantes).`,
+      authorized: true,
+      amountInvolved: cashflowSummary.totalCollected,
+      actorEmail: adminUser.email,
+      actorName: adminUser.name,
+      actorRole: 'ADMIN_MASTER',
+    });
+
     const headers = ['ID', 'Assinante', 'Email', 'Telefone', 'Papel', 'Plano', 'Valor (R$)', 'Forma', 'Status', 'Data Pagamento', 'Vencimento', 'Referencia', 'Transacao ID'];
     const rows = subscriberPayments.map(p => [
       p.id,
@@ -578,6 +683,19 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
   // Snapshot Export
   const handleExportFullSnapshot = () => {
+    logBalanceAccessEvent({
+      type: 'DATA_EXPORT',
+      severity: 'WARNING',
+      action: 'EXPORT_FULL_SNAPSHOT',
+      resource: 'AdminMasterView > Backup JSON Master',
+      details: `Admin Master (${adminUser.email}) exportou snapshot completo do banco de dados e saldos.`,
+      authorized: true,
+      amountInvolved: cashflowSummary.totalCollected,
+      actorEmail: adminUser.email,
+      actorName: adminUser.name,
+      actorRole: 'ADMIN_MASTER',
+    });
+
     const systemSnapshot = {
       meta: {
         app: 'Mãos em Obra - Master Database Snapshot',
@@ -646,13 +764,84 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
   const registeredCount = team.length + serviceRequests.length;
 
+  const BALANCE_EVENT_TYPES = new Set([
+    'BALANCE_ACCESS_VIEW',
+    'BALANCE_WITHDRAW_ATTEMPT',
+    'BALANCE_ACCESS_DENIED',
+    'PIX_AUTO_TRANSFER',
+    'SENSITIVE_DATA_VIEW',
+  ]);
+  const WITHDRAWAL_EVENT_TYPES = new Set([
+    'BALANCE_WITHDRAW_ATTEMPT',
+    'PIX_AUTO_TRANSFER',
+  ]);
+
+  const balanceAuditLogsOnly = auditLogs.filter((log) => BALANCE_EVENT_TYPES.has(log.type));
+
   const filteredLogs = auditLogs.filter(log => {
-    if (logFilter === 'ALL') return true;
-    if (logFilter === 'CRITICAL') return log.severity === 'CRITICAL' || log.severity === 'ALERT';
-    if (logFilter === 'WARNING') return log.severity === 'WARNING';
-    if (logFilter === 'INFO') return log.severity === 'INFO';
+    if (logCategoryFilter === 'BALANCE' && !BALANCE_EVENT_TYPES.has(log.type)) return false;
+    if (logCategoryFilter === 'WITHDRAWALS' && !WITHDRAWAL_EVENT_TYPES.has(log.type)) return false;
+    if (logCategoryFilter === 'DENIED' && log.type !== 'BALANCE_ACCESS_DENIED' && log.authorized !== false) return false;
+    if (logCategoryFilter === 'CRITICAL' && log.severity !== 'CRITICAL' && log.severity !== 'ALERT') return false;
+    if (logCategoryFilter === 'INFO' && log.severity !== 'INFO') return false;
+
+    if (logSearchTerm.trim()) {
+      const q = logSearchTerm.toLowerCase();
+      const hay = [
+        log.type,
+        log.details,
+        log.ip,
+        log.actorEmail || '',
+        log.actorName || '',
+        log.actorRole || '',
+        log.action || '',
+        log.resource || '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   });
+
+  const handleExportAuditCsv = () => {
+    logBalanceAccessEvent({
+      type: 'SENSITIVE_DATA_VIEW',
+      severity: 'INFO',
+      action: 'EXPORT_AUDIT_CSV',
+      resource: 'AdminMasterView > Logs de Auditoria CSV',
+      details: `Admin Master (${adminUser.email}) exportou ${filteredLogs.length} registros de auditoria de saldo e segurança.`,
+      authorized: true,
+      actorEmail: adminUser.email,
+      actorName: adminUser.name,
+      actorRole: 'ADMIN_MASTER',
+    });
+
+    const headers = ['DataHora', 'Tipo', 'Severidade', 'Autorizado', 'Usuario', 'Email', 'Perfil', 'Acao', 'Recurso', 'ValorEnvolvido', 'IP', 'Detalhes'];
+    const rows = filteredLogs.map((log) => [
+      new Date(log.timestamp).toLocaleString('pt-BR'),
+      log.type,
+      log.severity,
+      log.authorized === false || log.type === 'BALANCE_ACCESS_DENIED' ? 'NEGADO' : 'AUTORIZADO',
+      `"${(log.actorName || 'Sistema').replace(/"/g, '""')}"`,
+      log.actorEmail || '-',
+      log.actorRole || '-',
+      log.action || '-',
+      `"${(log.resource || '-').replace(/"/g, '""')}"`,
+      typeof log.amountInvolved === 'number' ? log.amountInvolved.toFixed(2) : '',
+      log.ip || '-',
+      `"${(log.details || '').replace(/"/g, '""')}"`,
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `auditoria-acessos-saldo-maos-em-obra-${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -862,7 +1051,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
         {/* TAB 1: CAIXA E ASSINANTES (DESTAQUE) */}
         <button
-          onClick={() => setActiveSubTab('cashflow')}
+          onClick={() => handleChangeSubTab('cashflow')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'cashflow'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -878,7 +1067,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
         {/* TAB 2: NOTAS FISCAIS NFS-e & EMISSÃO AUTOMÁTICA */}
         <button
-          onClick={() => setActiveSubTab('fiscal')}
+          onClick={() => handleChangeSubTab('fiscal')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'fiscal'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -894,7 +1083,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
         {/* TAB 3: FISCAL AUTOMATION MODULE — CERTIFICADO A1, CNPJ & ENDPOINTS API */}
         <button
-          onClick={() => setActiveSubTab('fiscal_config')}
+          onClick={() => handleChangeSubTab('fiscal_config')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'fiscal_config'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -906,7 +1095,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveSubTab('shield')}
+          onClick={() => handleChangeSubTab('shield')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'shield'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -918,7 +1107,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveSubTab('database')}
+          onClick={() => handleChangeSubTab('database')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'database'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -930,7 +1119,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveSubTab('logs')}
+          onClick={() => handleChangeSubTab('logs')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'logs'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -938,11 +1127,16 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           }`}
         >
           <Terminal className="w-4 h-4" />
-          <span>Logs de Auditoria ({auditLogs.length})</span>
+          <span>Auditoria de Saldo & Segurança ({auditLogs.length})</span>
+          {balanceAuditSummary.deniedAttempts > 0 && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-600 text-white ml-0.5">
+              {balanceAuditSummary.deniedAttempts} negados
+            </span>
+          )}
         </button>
 
         <button
-          onClick={() => setActiveSubTab('users')}
+          onClick={() => handleChangeSubTab('users')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'users'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -954,7 +1148,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveSubTab('prospec')}
+          onClick={() => handleChangeSubTab('prospec')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'prospec'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -966,7 +1160,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveSubTab('invitations')}
+          onClick={() => handleChangeSubTab('invitations')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'invitations'
               ? 'bg-amber-500 text-slate-950 shadow-md'
@@ -1220,6 +1414,101 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                   <div>Chave PIX: <strong>{withdrawalResultModal.pixKey}</strong></div>
                   <div>Destino: <strong>{withdrawalResultModal.destination || 'Mercado Pago (323)'}</strong></div>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* 🔍 RESUMO DE AUDITORIA DE ACESSOS AO SALDO E SAQUES */}
+          <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-lg space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                  <Eye className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                    Auditoria de Transparência — Quem Acessou Saldos & Funções de Saque
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Rastreamento contínuo de visualizações autorizadas, saques PIX e bloqueios de usuários sem permissão Master.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setLogCategoryFilter('BALANCE');
+                  handleChangeSubTab('logs');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Ver Histórico Completo de Auditoria</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800">
+                <span className="text-[10px] font-bold uppercase text-slate-400 block">Eventos de Saldo</span>
+                <span className="text-lg font-black text-white tabular-nums">{balanceAuditSummary.totalBalanceEvents}</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950/80 border border-emerald-900/50">
+                <span className="text-[10px] font-bold uppercase text-emerald-400 block">Leituras Autorizadas</span>
+                <span className="text-lg font-black text-emerald-400 tabular-nums">{balanceAuditSummary.authorizedViews}</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950/80 border border-amber-900/50">
+                <span className="text-[10px] font-bold uppercase text-amber-400 block">Saques / Ações PIX</span>
+                <span className="text-lg font-black text-amber-400 tabular-nums">{balanceAuditSummary.withdrawalAttempts}</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950/80 border border-rose-900/50">
+                <span className="text-[10px] font-bold uppercase text-rose-400 block">Tentativas Negadas</span>
+                <span className="text-lg font-black text-rose-400 tabular-nums">{balanceAuditSummary.deniedAttempts}</span>
+              </div>
+            </div>
+
+            {balanceAuditLogsOnly.length > 0 && (
+              <div className="space-y-2">
+                {balanceAuditLogsOnly.slice(0, 3).map((ev) => {
+                  const isDenied = ev.type === 'BALANCE_ACCESS_DENIED' || ev.authorized === false;
+                  return (
+                    <div
+                      key={ev.id}
+                      className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+                        isDenied
+                          ? 'bg-rose-950/30 border-rose-800/60 text-rose-200'
+                          : 'bg-slate-950/70 border-slate-800 text-slate-200'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                            isDenied ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'
+                          }`}
+                        >
+                          {isDenied ? 'NEGADO / BLOQUEADO' : 'AUTORIZADO'}
+                        </span>
+                        <span className="font-bold text-white truncate">
+                          {ev.actorName || 'Sistema'} ({ev.actorEmail || 'N/D'})
+                        </span>
+                        {ev.actorRole && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-bold">
+                            {ev.actorRole}
+                          </span>
+                        )}
+                        <span className="text-slate-400 truncate">— {ev.resource || ev.action || ev.type}</span>
+                        {typeof ev.amountInvolved === 'number' && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold">
+                            R$ {ev.amountInvolved.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-400 shrink-0 font-mono">
+                        {new Date(ev.timestamp).toLocaleString('pt-BR')} · IP {ev.ip}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1811,88 +2100,254 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
         </div>
       )}
 
-      {/* TAB 4: AUDIT LOGS */}
+      {/* TAB 4: AUDIT LOGS & TRANSPARÊNCIA DE ACESSOS AO SALDO */}
       {activeSubTab === 'logs' && (
         <div className="space-y-4">
+          {/* KPIs de Auditoria de Saldo */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-black uppercase text-slate-400">Eventos de Saldo</span>
+                <Eye className="w-4 h-4 text-sky-400" />
+              </div>
+              <div className="text-2xl font-black text-white tabular-nums">
+                {balanceAuditSummary.totalBalanceEvents}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1 truncate">
+                {balanceAuditSummary.lastActor
+                  ? `Último ator: ${balanceAuditSummary.lastActor}`
+                  : 'Monitoramento em tempo real ativo'}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-emerald-800/50 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-black uppercase text-emerald-400">Visualizações Autorizadas</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="text-2xl font-black text-emerald-400 tabular-nums">
+                {balanceAuditSummary.authorizedViews}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Leituras validadas com Token Master
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-amber-800/50 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-black uppercase text-amber-400">Saques & Interações PIX</span>
+                <Wallet className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="text-2xl font-black text-amber-400 tabular-nums">
+                {balanceAuditSummary.withdrawalAttempts}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Aberturas de modal, auto-sweep e PIX
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-rose-800/60 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-black uppercase text-rose-400">Tentativas Negadas / Bloqueadas</span>
+                <Ban className="w-4 h-4 text-rose-400" />
+              </div>
+              <div className="text-2xl font-black text-rose-400 tabular-nums">
+                {balanceAuditSummary.deniedAttempts}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Bloqueios automáticos de não-masters
+              </div>
+            </div>
+          </div>
+
           <div className="p-6 rounded-3xl bg-slate-950 border border-slate-800 shadow-2xl text-slate-200 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-4">
               <div className="flex items-center gap-2">
                 <Terminal className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-sm font-black text-white uppercase tracking-wider">
-                  Terminal de Auditoria & Segurança Cibernética
-                </h3>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                    Auditoria de Acessos ao Saldo & Segurança Cibernética
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Registro completo de quem visualizou, interagiu ou tentou acessar valores e funções de saque.
+                  </p>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                {/* Filter */}
-                <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Category Filter */}
+                <div className="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
                   <button
-                    onClick={() => setLogFilter('ALL')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logFilter === 'ALL' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                    onClick={() => setLogCategoryFilter('ALL')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logCategoryFilter === 'ALL' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
                   >
-                    Todos
+                    Todos ({auditLogs.length})
                   </button>
                   <button
-                    onClick={() => setLogFilter('CRITICAL')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logFilter === 'CRITICAL' ? 'bg-rose-500 text-white' : 'text-slate-400 hover:text-white'}`}
+                    onClick={() => setLogCategoryFilter('BALANCE')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logCategoryFilter === 'BALANCE' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Acessos ao Saldo
+                  </button>
+                  <button
+                    onClick={() => setLogCategoryFilter('WITHDRAWALS')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logCategoryFilter === 'WITHDRAWALS' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Saques & PIX
+                  </button>
+                  <button
+                    onClick={() => setLogCategoryFilter('DENIED')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logCategoryFilter === 'DENIED' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    Bloqueados ({balanceAuditSummary.deniedAttempts})
+                  </button>
+                  <button
+                    onClick={() => setLogCategoryFilter('CRITICAL')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logCategoryFilter === 'CRITICAL' ? 'bg-rose-500 text-white' : 'text-slate-400 hover:text-white'}`}
                   >
                     Críticos
                   </button>
                   <button
-                    onClick={() => setLogFilter('INFO')}
-                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logFilter === 'INFO' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
+                    onClick={() => setLogCategoryFilter('INFO')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logCategoryFilter === 'INFO' ? 'bg-blue-500 text-white' : 'text-slate-400 hover:text-white'}`}
                   >
                     Info
                   </button>
                 </div>
 
                 <button
+                  onClick={handleExportAuditCsv}
+                  className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  title="Exportar Auditoria em CSV"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Exportar CSV</span>
+                </button>
+
+                <button
                   onClick={() => loadAllAdminData(true)}
                   className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition cursor-pointer"
                   title="Atualizar Logs"
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                 </button>
               </div>
             </div>
 
-            {/* Logs Terminal Window */}
-            <div className="space-y-2 max-h-96 overflow-y-auto font-mono text-xs pr-2 scrollbar-thin">
+            {/* Search bar */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={logSearchTerm}
+                onChange={(e) => setLogSearchTerm(e.target.value)}
+                placeholder="Filtrar por e-mail, usuário, IP, ação ou recurso acessado..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            {/* Logs Feed */}
+            <div className="space-y-2.5 max-h-[32rem] overflow-y-auto pr-2 scrollbar-thin">
               {filteredLogs.length === 0 ? (
-                <div className="text-center py-8 text-slate-500">
-                  Nenhum evento registrado no momento.
+                <div className="text-center py-10 text-slate-500 text-xs">
+                  Nenhum evento de auditoria encontrado para os filtros selecionados.
                 </div>
               ) : (
-                filteredLogs.map((log) => (
-                  <div 
-                    key={log.id} 
-                    className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
-                      log.severity === 'CRITICAL' || log.severity === 'ALERT'
-                        ? 'bg-rose-950/30 border-rose-800/60 text-rose-300'
-                        : log.severity === 'WARNING'
-                        ? 'bg-amber-950/30 border-amber-800/60 text-amber-300'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase shrink-0 mt-0.5 ${
-                        log.severity === 'CRITICAL' || log.severity === 'ALERT'
-                          ? 'bg-rose-500 text-white'
-                          : log.severity === 'WARNING'
-                          ? 'bg-amber-500 text-slate-950'
-                          : 'bg-emerald-600 text-white'
-                      }`}>
-                        {log.type}
-                      </span>
-                      <span className="leading-snug break-all">{log.details}</span>
-                    </div>
+                filteredLogs.map((log) => {
+                  const isDenied = log.type === 'BALANCE_ACCESS_DENIED' || log.authorized === false;
+                  const isCritical = log.severity === 'CRITICAL' || log.severity === 'ALERT';
+                  const isBalanceEvent = BALANCE_EVENT_TYPES.has(log.type);
 
-                    <div className="text-[10px] text-slate-500 shrink-0 font-sans sm:text-right">
-                      <div>{new Date(log.timestamp).toLocaleTimeString()}</div>
-                      <div>IP: {log.ip}</div>
+                  return (
+                    <div
+                      key={log.id}
+                      className={`p-3.5 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                        isDenied || isCritical
+                          ? 'bg-rose-950/30 border-rose-800/60 text-rose-200'
+                          : log.severity === 'WARNING'
+                          ? 'bg-amber-950/25 border-amber-800/50 text-amber-200'
+                          : isBalanceEvent
+                          ? 'bg-slate-900/90 border-sky-900/50 text-slate-200'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <div className="space-y-1.5 min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wide ${
+                              isDenied || isCritical
+                                ? 'bg-rose-600 text-white'
+                                : log.severity === 'WARNING'
+                                ? 'bg-amber-500 text-slate-950'
+                                : isBalanceEvent
+                                ? 'bg-sky-600 text-white'
+                                : 'bg-emerald-600 text-white'
+                            }`}
+                          >
+                            {log.type}
+                          </span>
+
+                          {typeof log.authorized === 'boolean' && (
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                log.authorized
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                  : 'bg-rose-500/25 text-rose-300 border border-rose-500/50'
+                              }`}
+                            >
+                              {log.authorized ? 'AUTORIZADO' : 'NEGADO / BLOQUEADO'}
+                            </span>
+                          )}
+
+                          {log.actorRole && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 text-[10px] font-bold uppercase border border-slate-700">
+                              {log.actorRole}
+                            </span>
+                          )}
+
+                          {typeof log.amountInvolved === 'number' && (
+                            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono text-[10px] font-black">
+                              R$ {log.amountInvolved.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="text-xs font-semibold text-white leading-snug break-words">
+                          {log.details}
+                        </div>
+
+                        {(log.actorEmail || log.actorName || log.action || log.resource) && (
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                            {(log.actorName || log.actorEmail) && (
+                              <span className="flex items-center gap-1">
+                                <UserCheck className="w-3 h-3 text-emerald-400" />
+                                <strong className="text-slate-200">{log.actorName || 'Usuário'}</strong>
+                                {log.actorEmail && <span className="font-mono">({log.actorEmail})</span>}
+                              </span>
+                            )}
+                            {log.action && (
+                              <span>
+                                Ação: <code className="text-amber-300 font-mono">{log.action}</code>
+                              </span>
+                            )}
+                            {log.resource && (
+                              <span>
+                                Recurso: <span className="text-slate-300">{log.resource}</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-[11px] text-slate-400 shrink-0 font-mono md:text-right border-t md:border-t-0 border-slate-800/80 pt-2 md:pt-0">
+                        <div className="text-slate-200 font-semibold">
+                          {new Date(log.timestamp).toLocaleString('pt-BR')}
+                        </div>
+                        <div>IP: {log.ip || 'N/D'}</div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

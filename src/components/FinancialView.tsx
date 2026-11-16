@@ -49,6 +49,8 @@ import {
   batchCreateMercadoPagoPreferences
 } from '../services/mercadoPago';
 import { getBudgetOptimizationSuggestions, type OptimizationResponse } from '../services/ai';
+import { getCachedAdminSession } from '../services/adminAuth';
+import { logBalanceAccessEvent } from '../services/balanceAudit';
 import confetti from 'canvas-confetti';
 
 interface FinancialViewProps {
@@ -197,7 +199,17 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   };
 
   const handleSendRevenuesToMercadoPago = async () => {
-    if (!isAdminAuthenticated) return;
+    if (!isAdminAuthenticated) {
+      logBalanceAccessEvent({
+        type: 'BALANCE_ACCESS_DENIED',
+        severity: 'CRITICAL',
+        action: 'FINANCIAL_SEND_REVENUES_BLOCKED',
+        resource: 'FinancialView > Enviar Receitas ao MP',
+        details: 'Tentativa bloqueada de enviar receitas ao Mercado Pago sem autenticação Admin Master.',
+        authorized: false,
+      });
+      return;
+    }
     const pendingIncomes = incomeTransactions.filter(e => e.status !== 'Pago');
     const itemsToSend = (pendingIncomes.length > 0 ? pendingIncomes : incomeTransactions).map(e => ({
       title: e.description || 'Receita / Aporte de Obra',
@@ -211,6 +223,16 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
       alert('Nenhuma receita ou aporte cadastrado para enviar ao Mercado Pago. Cadastre uma receita na obra primeiro.');
       return;
     }
+
+    logBalanceAccessEvent({
+      type: 'SENSITIVE_DATA_VIEW',
+      severity: 'INFO',
+      action: 'FINANCIAL_SEND_REVENUES_MP',
+      resource: 'FinancialView > Enviar Receitas ao MP',
+      details: `Admin Master enviou ${itemsToSend.length} receita(s) da obra "${project.title}" para cobrança no Mercado Pago.`,
+      authorized: true,
+      actorRole: 'ADMIN_MASTER',
+    });
 
     setIsSyncingRevenues(true);
     try {
@@ -231,7 +253,17 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
   const [transferResultModal, setTransferResultModal] = useState<{ open: boolean; data: any } | null>(null);
 
   const handleTransferAvailableCashToMercadoPago = async () => {
-    if (!isAdminAuthenticated) return;
+    if (!isAdminAuthenticated) {
+      logBalanceAccessEvent({
+        type: 'BALANCE_ACCESS_DENIED',
+        severity: 'CRITICAL',
+        action: 'FINANCIAL_TRANSFER_PIX_BLOCKED',
+        resource: 'FinancialView > Transferir Saldo PIX',
+        details: 'Tentativa bloqueada de transferir saldo via PIX para Mercado Pago sem autenticação Admin Master.',
+        authorized: false,
+      });
+      return;
+    }
     const amountToTransfer = availableCash > 0 ? availableCash : totalReceived;
     if (amountToTransfer <= 0) {
       alert('Nenhum valor disponível para transferência imediata no momento.');
@@ -242,11 +274,26 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
       return;
     }
 
+    logBalanceAccessEvent({
+      type: 'BALANCE_WITHDRAW_ATTEMPT',
+      severity: 'WARNING',
+      action: 'FINANCIAL_TRANSFER_PIX',
+      resource: `FinancialView (${project.title})`,
+      details: `Admin Master iniciou transferência PIX de R$ ${amountToTransfer.toFixed(2)} da obra "${project.title}" para Mercado Pago.`,
+      authorized: true,
+      amountInvolved: amountToTransfer,
+      actorRole: 'ADMIN_MASTER',
+    });
+
     setIsTransferringPix(true);
     try {
+      const token = getCachedAdminSession()?.token;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch('/api/mercadopago/transfer-pix', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           amount: amountToTransfer,
           projectName: project.title,

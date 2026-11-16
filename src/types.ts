@@ -265,14 +265,35 @@ export interface SecurityShieldStatus {
   environment: string;
 }
 
+export type SecurityAuditLogType =
+  | 'LOGIN_SUCCESS'
+  | 'LOGIN_BLOCKED'
+  | 'BRUTE_FORCE_THROTTLED'
+  | 'INJECTION_ATTEMPT_BLOCKED'
+  | 'DATA_EXPORT'
+  | 'SECURITY_SCAN'
+  | 'CONFIG_CHANGE'
+  | 'BALANCE_ACCESS_VIEW'
+  | 'BALANCE_WITHDRAW_ATTEMPT'
+  | 'BALANCE_ACCESS_DENIED'
+  | 'PIX_AUTO_TRANSFER'
+  | 'SENSITIVE_DATA_VIEW';
+
 export interface SecurityAuditLog {
   id: string;
   timestamp: string;
-  type: 'LOGIN_SUCCESS' | 'LOGIN_BLOCKED' | 'BRUTE_FORCE_THROTTLED' | 'INJECTION_ATTEMPT_BLOCKED' | 'DATA_EXPORT' | 'SECURITY_SCAN' | 'CONFIG_CHANGE';
+  type: SecurityAuditLogType | string;
   severity: 'INFO' | 'WARNING' | 'ALERT' | 'CRITICAL';
   ip: string;
   userAgent?: string;
   details: string;
+  actorEmail?: string;
+  actorName?: string;
+  actorRole?: 'ADMIN_MASTER' | 'SUBSCRIBER' | 'USER' | 'VISITOR' | 'SYSTEM' | 'UNKNOWN';
+  action?: string;
+  resource?: string;
+  authorized?: boolean;
+  amountInvolved?: number;
 }
 
 export type SubscriberRole = 
