@@ -1,5 +1,5 @@
 // Service Worker for "Mãos em Obra" PWA
-const CACHE_NAME = 'maos-em-obra-v3';
+const CACHE_NAME = 'maos-em-obra-v4';
 const PRECACHE_ASSETS = [
   '/manifest.json',
   '/icon.svg',

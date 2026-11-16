@@ -331,7 +331,11 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
   };
 
   const handleAdminWithdrawalClick = async () => {
-    const amountToWithdraw = cashflowSummary.totalCollected || 1834.80;
+    const amountToWithdraw = cashflowSummary.totalCollected || 0;
+    if (amountToWithdraw <= 0) {
+      alert('Nenhum valor real disponível em conta no momento.');
+      return;
+    }
 
     setIsWithdrawing(true);
     setWithdrawalResultModal(null);
@@ -340,8 +344,8 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
       type: 'BALANCE_WITHDRAW_ATTEMPT',
       severity: 'WARNING',
       action: 'ADMIN_PANEL_AUTO_SWEEP',
-      resource: 'AdminMasterView > Sacar p/ Mercado Pago',
-      details: `Admin Master (${adminUser.email}) solicitou saque imediato via PIX no valor de R$ ${amountToWithdraw.toFixed(2)}.`,
+      resource: 'AdminMasterView > Valor Real Disponível em Conta',
+      details: `Admin Master (${adminUser.email}) solicitou transferência do valor real disponível em conta via PIX (R$ ${amountToWithdraw.toFixed(2)}).`,
       authorized: true,
       amountInvolved: amountToWithdraw,
       actorEmail: adminUser.email,
@@ -399,7 +403,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
     if (tab === 'cashflow' || tab === 'logs' || tab === 'users') {
       const resourceLabel =
         tab === 'cashflow'
-          ? 'AdminMasterView > Aba Caixa & Saques'
+          ? 'AdminMasterView > Aba Valor Disponível & Caixa'
           : tab === 'logs'
           ? 'AdminMasterView > Aba Auditoria de Acessos'
           : 'AdminMasterView > Aba Visão Geral de Assinantes';
@@ -934,18 +938,18 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
           {/* Quick Actions */}
           <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0">
-            {/* ⚡ BOTÃO DE SAQUE IMEDIATO PARA O ADMIN MASTER GLOBAL ⚡ */}
+            {/* ⚡ VALOR REAL DISPONÍVEL EM CONTA PARA O ADMIN MASTER GLOBAL ⚡ */}
             <button
               onClick={handleAdminWithdrawalClick}
               disabled={isWithdrawing || cashflowSummary.totalCollected <= 0}
-              className="px-4 py-3 bg-gradient-to-r from-emerald-500 via-teal-500 to-[#009ee3] hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-xl border border-emerald-300 transition cursor-pointer active:scale-95"
-              title={`Disparo de Saque Imediato R$ ${(cashflowSummary.totalCollected || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX para Mercado Pago`}
+              className="px-4 py-3 bg-gradient-to-r from-emerald-500 via-teal-500 to-[#009ee3] hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-xl border border-emerald-300 transition cursor-pointer active:scale-95 disabled:opacity-50"
+              title={`Valor real disponível em conta: R$ ${(cashflowSummary.totalCollected || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Transferir via PIX p/ Mercado Pago)`}
             >
               <Wallet className="w-4 h-4 text-slate-950" />
               <span>
                 {isWithdrawing
-                  ? `Transferindo R$ ${(cashflowSummary.totalCollected || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}...`
-                  : `Sacar R$ ${(cashflowSummary.totalCollected || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Imediato (PIX)`}
+                  ? `Transferindo R$ ${(cashflowSummary.totalCollected || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}...`
+                  : `Valor real disponível em conta: R$ ${(cashflowSummary.totalCollected || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
               </span>
             </button>
 
@@ -997,7 +1001,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
           </div>
         </div>
 
-        {/* ⚡ BANNER PERMANENTE DE SAQUE IMEDIATO R$ 1.834,80 (DISPARO ONLINE EM TEMPO REAL) ⚡ */}
+        {/* ⚡ BANNER PERMANENTE: VALOR REAL DISPONÍVEL EM CONTA (TEMPO REAL) ⚡ */}
         <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-slate-900 border-2 border-emerald-500 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-emerald-500 text-slate-950 rounded-2xl font-black shrink-0">
@@ -1005,13 +1009,13 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
             </div>
             <div>
               <div className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                <span>Disparo Online de Saque Imediato em Tempo Real</span>
+                <span>Valor Real Disponível em Conta (Tempo Real)</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500 text-slate-950">
                   PIX Instantâneo
                 </span>
               </div>
               <p className="text-sm font-black text-white mt-0.5">
-                Saldo Arrecadado Liberado: <span className="text-emerald-400 font-extrabold">R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                Valor real disponível em conta: <span className="text-emerald-400 font-extrabold">R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
               </p>
               <p className="text-[11px] text-slate-300">
                 Destino: Mercado Pago (Banco 323) • Titular: <strong>{MASTER_CREDENTIALS.name}</strong> • Chave PIX: <strong>{MASTER_CREDENTIALS.pixKey}</strong>
@@ -1027,12 +1031,12 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
             {isWithdrawing ? (
               <>
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Processando Disparo PIX...</span>
+                <span>Processando Transferência PIX...</span>
               </>
             ) : (
               <>
                 <ArrowUpRight className="w-4 h-4" />
-                <span>Disparar Saque Imediato de R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                <span>Transferir Valor Real Disponível em Conta (R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})</span>
               </>
             )}
           </button>
@@ -1205,11 +1209,11 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
               </div>
             </div>
 
-            {/* 2. DISPONÍVEL PARA SAQUE IMEDIATO */}
+            {/* 2. VALOR REAL DISPONÍVEL EM CONTA */}
             <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-950/20 to-slate-900 border-2 border-emerald-500/40 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-black text-emerald-400 uppercase tracking-wider">
-                  Disponível p/ Saque Imediato
+                  Valor Real Disponível em Conta
                 </span>
                 <span className="p-2 rounded-xl bg-emerald-500/20 text-emerald-300">
                   <Wallet className="w-5 h-5" />
@@ -1320,13 +1324,13 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 </div>
                 <div>
                   <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                    <span>Saque para Conta Mercado Pago via Chave PIX</span>
+                    <span>Transferência do Valor Real Disponível em Conta via Chave PIX</span>
                     <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
-                      Disponível: R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      Valor real disponível em conta: R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </span>
                   </h4>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    Transfira instantaneamente todos os valores arrecadados para a sua conta do Mercado Pago usando a chave PIX <strong className="text-emerald-400">{MASTER_CREDENTIALS.pixKey}</strong>.
+                    Transfira instantaneamente o valor real disponível em conta para o Mercado Pago usando a chave PIX <strong className="text-emerald-400">{MASTER_CREDENTIALS.pixKey}</strong>.
                   </p>
                 </div>
               </div>
@@ -1345,7 +1349,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                   ) : (
                     <>
                       <ArrowUpRight className="w-4 h-4" />
-                      <span>Sacar R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} p/ Mercado Pago</span>
+                      <span>Valor real disponível em conta: R$ {cashflowSummary.totalCollected.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Transferir p/ MP)</span>
                     </>
                   )}
                 </button>
@@ -1427,10 +1431,10 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 </div>
                 <div>
                   <h4 className="text-xs font-black uppercase tracking-wider text-white">
-                    Auditoria de Transparência — Quem Acessou Saldos & Funções de Saque
+                    Auditoria de Transparência — Quem Acessou o Valor Real Disponível em Conta
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Rastreamento contínuo de visualizações autorizadas, saques PIX e bloqueios de usuários sem permissão Master.
+                    Rastreamento contínuo de visualizações autorizadas, transferências PIX e bloqueios de usuários sem permissão Master.
                   </p>
                 </div>
               </div>
@@ -1458,7 +1462,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                 <span className="text-lg font-black text-emerald-400 tabular-nums">{balanceAuditSummary.authorizedViews}</span>
               </div>
               <div className="p-3 rounded-2xl bg-slate-950/80 border border-amber-900/50">
-                <span className="text-[10px] font-bold uppercase text-amber-400 block">Saques / Ações PIX</span>
+                <span className="text-[10px] font-bold uppercase text-amber-400 block">Transferências / Ações PIX</span>
                 <span className="text-lg font-black text-amber-400 tabular-nums">{balanceAuditSummary.withdrawalAttempts}</span>
               </div>
               <div className="p-3 rounded-2xl bg-slate-950/80 border border-rose-900/50">
@@ -2135,7 +2139,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
 
             <div className="p-4 rounded-2xl bg-slate-950 border border-amber-800/50 shadow-sm">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-black uppercase text-amber-400">Saques & Interações PIX</span>
+                <span className="text-[11px] font-black uppercase text-amber-400">Transferências & Interações PIX</span>
                 <Wallet className="w-4 h-4 text-amber-400" />
               </div>
               <div className="text-2xl font-black text-amber-400 tabular-nums">
@@ -2169,7 +2173,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                     Auditoria de Acessos ao Saldo & Segurança Cibernética
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Registro completo de quem visualizou, interagiu ou tentou acessar valores e funções de saque.
+                    Registro completo de quem visualizou, interagiu ou tentou acessar o valor real disponível em conta.
                   </p>
                 </div>
               </div>
@@ -2193,7 +2197,7 @@ export const AdminMasterView: React.FC<AdminMasterViewProps> = ({
                     onClick={() => setLogCategoryFilter('WITHDRAWALS')}
                     className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${logCategoryFilter === 'WITHDRAWALS' ? 'bg-emerald-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}
                   >
-                    Saques & PIX
+                    Transferências & PIX
                   </button>
                   <button
                     onClick={() => setLogCategoryFilter('DENIED')}

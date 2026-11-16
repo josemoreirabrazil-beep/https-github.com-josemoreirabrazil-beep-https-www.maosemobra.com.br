@@ -455,8 +455,8 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               </h2>
               <p className="text-xs sm:text-sm font-semibold text-slate-900/90 leading-relaxed mt-1 max-w-3xl">
                 {isAdmin
-                  ? 'Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO, acompanhe fluxo de caixa, solicite orçamentos de insumos com frete/mobilização e efetue saques imediatos via PIX.'
-                  : 'Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO, acompanhe o fluxo de caixa da sua obra e solicite orçamentos de insumos com frete e mobilização.'}
+                  ? 'Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO, acompanhe fluxo de caixa, solicite orçamentos de insumos com frete/mobilização e consulte o valor real disponível em conta via PIX.'
+                  : 'Acesso oficial ativo para clientes assinantes, profissionais parceiros e visitantes! Gerencie obras, lance diários RDO e solicite orçamentos de insumos com frete e mobilização.'}
               </p>
             </div>
           </div>
@@ -482,7 +482,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
             </span>
             <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
               <Building2 className="w-5 h-5 text-amber-500" />
-              Status do Sistema & Caixa em Tempo Real
+              {isAdmin ? 'Status do Sistema & Valor Real Disponível em Conta' : 'Visão Geral do Canteiro & Obra'}
             </h1>
           </div>
 
@@ -696,63 +696,59 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           </div>
         </div>
 
-        {/* Real Cash & Balance Breakdown */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
-          
-          {/* Disponível em Caixa */}
-          <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Disponível em Caixa (Saldo Real)
-                </span>
-                {isAdmin && (
+        {/* Real Cash & Balance Breakdown (Exclusivo Admin Master Global — Invisível para usuários/público) */}
+        {isAdmin && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
+            
+            {/* Valor Real Disponível em Conta */}
+            <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                    Valor Real Disponível em Conta
+                  </span>
                   <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Auto-Saque PIX Ativo
+                    Repasse Automático PIX Ativo
                   </span>
-                )}
+                </div>
+                <div className={`text-2xl font-black ${availableCash >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                  R$ {availableCash.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-1 block">
+                  Repasse imediato de todo valor recebido p/ conta Mercado Pago via PIX (+55 73 99859-9213)
+                </span>
               </div>
-              <div className={`text-2xl font-black ${availableCash >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                R$ {availableCash.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+
+            {/* Valores Recebidos */}
+            <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Valores Recebidos (Entradas)
+              </span>
+              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                R$ {totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold mt-1 block">
-                {isAdmin
-                  ? 'Repasse imediato de todo valor recebido p/ conta Mercado Pago via PIX (+55 73 99859-9213)'
-                  : 'Saldo líquido disponível da obra atual (Entradas - Pagamentos)'}
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                Total quitado por clientes e solicitantes
               </span>
             </div>
 
-
-          </div>
-
-          {/* Valores Recebidos */}
-          <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-              Valores Recebidos (Entradas)
-            </span>
-            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
-              R$ {totalReceived.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {/* Valores Pendentes */}
+            <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Valores Pendentes a Pagar
+              </span>
+              <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                R$ {totalPendingExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                Despesas e cotações em aberto
+              </span>
             </div>
-            <span className="text-[10px] text-slate-400 mt-1 block">
-              Total quitado por clientes e solicitantes
-            </span>
-          </div>
 
-          {/* Valores Pendentes */}
-          <div className="p-4 rounded-2xl bg-[#f8f9fa] dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-              Valores Pendentes a Pagar
-            </span>
-            <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
-              R$ {totalPendingExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-            <span className="text-[10px] text-slate-400 mt-1 block">
-              Despesas e cotações em aberto
-            </span>
           </div>
-
-        </div>
+        )}
 
         {/* 👥 STATUS DA ASSINATURA ATUAL */}
         <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4">

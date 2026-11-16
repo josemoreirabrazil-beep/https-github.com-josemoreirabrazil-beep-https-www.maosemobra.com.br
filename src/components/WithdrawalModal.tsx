@@ -50,11 +50,11 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
   isOpen,
   onClose,
   isAdminAuthenticated = false,
-  availableAmount = 1834.80,
+  availableAmount = 0,
   onSuccess,
 }) => {
   const [activeTab, setActiveTab] = useState<'withdraw' | 'history'>('withdraw');
-  const [amount, setAmount] = useState<number>(availableAmount || 1834.80);
+  const [amount, setAmount] = useState<number>(availableAmount || 0);
   const [isWithdrawing, setIsWithdrawing] = useState<boolean>(false);
   const [isSweeping, setIsSweeping] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
   // History state
   const [historyList, setHistoryList] = useState<AutoTransferItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
-  const [totalAutoTransferred, setTotalAutoTransferred] = useState<number>(1834.80);
+  const [totalAutoTransferred, setTotalAutoTransferred] = useState<number>(0);
 
   // Active Receipt state
   const [receipt, setReceipt] = useState<{
@@ -96,7 +96,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
     }
     if (isOpen && isAdminAuthenticated) {
       loadHistory();
-      setAmount(availableAmount || 1834.80);
+      setAmount(availableAmount || 0);
       setErrorMsg(null);
     }
   }, [isOpen, isAdminAuthenticated, availableAmount]);
@@ -149,7 +149,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
 
   // Immediate Auto-Sweep of available balance
   const handleAutoSweep = async () => {
-    const sweepAmt = amount > 0 ? amount : availableAmount || 1834.80;
+    const sweepAmt = amount > 0 ? amount : availableAmount || 0;
     logBalanceAccessEvent({
       type: 'BALANCE_WITHDRAW_ATTEMPT',
       severity: 'WARNING',
@@ -215,17 +215,17 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
       confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
       setReceipt({
         transferId: `MP-PIX-AUTO-${Date.now()}`,
-        amount: amount || availableAmount || 1834.80,
+        amount: amount || availableAmount || 0,
         beneficiary: MASTER_CREDENTIALS.name,
         pixKey: MASTER_CREDENTIALS.pixKey,
         cpf: MASTER_CREDENTIALS.cpfFormatted,
         destination: 'Mercado Pago (Banco 323)',
         timestamp: new Date().toISOString(),
         status: 'approved_pix_payout',
-        message: `R$ ${(amount || availableAmount || 1834.80).toFixed(2)} transferidos automaticamente via PIX/QR Code para sua conta Mercado Pago.`,
+        message: `R$ ${(amount || availableAmount || 0).toFixed(2)} transferidos automaticamente via PIX/QR Code para sua conta Mercado Pago.`,
       });
       if (onSuccess) {
-        onSuccess(amount || availableAmount || 1834.80);
+        onSuccess(amount || availableAmount || 0);
       }
     } finally {
       setIsSweeping(false);
@@ -242,8 +242,8 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
       type: 'BALANCE_WITHDRAW_ATTEMPT',
       severity: 'WARNING',
       action: 'SUBMIT_MANUAL_PIX_WITHDRAWAL',
-      resource: 'WithdrawalModal > Saque PIX',
-      details: `Admin Master confirmou solicitação de saque manual de R$ ${amount.toFixed(2)} via PIX (${MASTER_CREDENTIALS.pixKey}).`,
+      resource: 'WithdrawalModal > Valor Real Disponível em Conta',
+      details: `Admin Master confirmou solicitação de transferência do valor real disponível em conta de R$ ${amount.toFixed(2)} via PIX (${MASTER_CREDENTIALS.pixKey}).`,
       authorized: true,
       amountInvolved: amount,
       actorRole: 'ADMIN_MASTER',
@@ -262,7 +262,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
         headers,
         body: JSON.stringify({
           amount,
-          projectName: 'Saque Plataforma Mãos em Obra',
+          projectName: 'Valor Real Disponível em Conta • Mãos em Obra',
           beneficiaryName: MASTER_CREDENTIALS.name,
           pixKey: MASTER_CREDENTIALS.pixKey,
         }),
@@ -330,7 +330,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-black text-base tracking-tight">Saque Automático Mercado Pago</h3>
+                <h3 className="font-black text-base tracking-tight">Valor Real Disponível em Conta • Mercado Pago</h3>
                 <span className="bg-white/20 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
                   <Zap className="w-2.5 h-2.5 text-amber-300 fill-amber-300" />
                   Instantâneo PIX
@@ -373,7 +373,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
               }`}
             >
               <Zap className="w-3.5 h-3.5" />
-              <span>Sacar / Varredura Imediata</span>
+              <span>Valor Real Disponível em Conta</span>
             </button>
             <button
               onClick={() => {
@@ -384,7 +384,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                   severity: 'INFO',
                   action: 'VIEW_TRANSFER_HISTORY',
                   resource: 'WithdrawalModal > Histórico',
-                  details: 'Admin Master consultou o histórico de auto-transferências PIX no modal de saque.',
+                  details: 'Admin Master consultou o histórico de transferências PIX e valor real disponível em conta.',
                   authorized: true,
                   actorRole: 'ADMIN_MASTER',
                 });
@@ -665,10 +665,10 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 </div>
               </div>
 
-              {/* Valor Específico do Saque Input */}
+              {/* Valor Específico Input */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Ou Informe Outro Valor para Saque (R$)
+                  Valor Real Disponível em Conta / Valor p/ Transferência (R$)
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">
@@ -678,7 +678,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                     type="number"
                     step="0.01"
                     min="1"
-                    max={availableAmount || 1834.80}
+                    max={availableAmount || undefined}
                     value={amount}
                     onChange={(e) => setAmount(Number(e.target.value) || 0)}
                     className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-lg font-black text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -689,10 +689,10 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 <div className="flex items-center gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => setAmount(availableAmount || 1834.80)}
+                    onClick={() => setAmount(availableAmount || 0)}
                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950/60 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-300 transition cursor-pointer"
                   >
-                    Saldo Total (R$ {(availableAmount || 1834.80).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                    Valor Real Disponível em Conta (R$ {(availableAmount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
                   </button>
                   <button
                     type="button"
@@ -731,7 +731,7 @@ export const WithdrawalModal: React.FC<WithdrawalModalProps> = ({
                 ) : (
                   <>
                     <ArrowUpRight className="w-5 h-5" />
-                    <span>SACAR R$ {amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} P/ MERCADO PAGO</span>
+                    <span>TRANSFERIR VALOR REAL DISPONÍVEL EM CONTA (R$ {amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})</span>
                   </>
                 )}
               </button>

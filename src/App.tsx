@@ -133,7 +133,7 @@ export default function App() {
   // Admin Master Global State
   const [adminUser, setAdminUser] = useState<AdminMasterUser | null>(() => getCachedAdminSession());
   const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
-  const [adminWithdrawalAmount, setAdminWithdrawalAmount] = useState<number>(1834.80);
+  const [adminWithdrawalAmount, setAdminWithdrawalAmount] = useState<number>(0);
 
   // Active Subscription Plan State (Free tier = view opportunities only; Pro = Laudo emission)
   const [activeSubscription, setActiveSubscription] = useState<ActiveSubscriptionState>(() => getActiveUserSubscription());
@@ -439,8 +439,8 @@ export default function App() {
         type: 'BALANCE_ACCESS_DENIED',
         severity: 'CRITICAL',
         action: 'OPEN_WITHDRAWAL_MODAL_BLOCKED',
-        resource: `WithdrawalModal (${source})`,
-        details: `Tentativa bloqueada de abrir o modal de saque a partir de "${source}" por usuário sem privilégio Admin Master (${user?.email || 'Visitante'}).`,
+        resource: `ValorRealDisponivelModal (${source})`,
+        details: `Tentativa bloqueada de acessar o valor real disponível em conta a partir de "${source}" por usuário sem privilégio Admin Master (${user?.email || 'Visitante'}).`,
         authorized: false,
         actorEmail: user?.email || null,
         actorName: user?.displayName || null,
@@ -452,8 +452,8 @@ export default function App() {
       type: 'BALANCE_ACCESS_VIEW',
       severity: 'INFO',
       action: 'OPEN_WITHDRAWAL_MODAL',
-      resource: `WithdrawalModal (${source})`,
-      details: `Admin Master (${adminUser.email}) abriu o modal de saque e histórico PIX via ${source} (Saldo: R$ ${adminWithdrawalAmount.toFixed(2)}).`,
+      resource: `ValorRealDisponivelModal (${source})`,
+      details: `Admin Master (${adminUser.email}) consultou o valor real disponível em conta via ${source} (Valor: R$ ${adminWithdrawalAmount.toFixed(2)}).`,
       authorized: true,
       amountInvolved: adminWithdrawalAmount,
       actorEmail: adminUser.email,

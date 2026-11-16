@@ -77,7 +77,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToReports,
   onOpenInstallModal,
   onOpenWithdrawalModal,
-  adminWithdrawalAmount = 1834.80,
+  adminWithdrawalAmount = 0,
   onOpenSearchModal,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);

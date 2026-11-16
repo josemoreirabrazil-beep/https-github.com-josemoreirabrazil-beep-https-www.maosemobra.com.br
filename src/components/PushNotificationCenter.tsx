@@ -11,8 +11,8 @@ interface PushNotificationCenterProps {
 
 const ADMIN_WITHDRAWAL_NOTIF = {
   id: 'notif-1',
-  title: 'Mercado Pago & PIX: Saldo Disponível',
-  body: 'O saque imediato de R$ 1.834,80 está disponível para transferência via PIX.',
+  title: 'Mercado Pago & PIX: Valor Real Disponível em Conta',
+  body: 'Consulte o valor real disponível em conta no painel exclusivo do Admin Master.',
   time: 'Agora mesmo'
 };
 
@@ -79,7 +79,7 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({
 
     const unsubscribe = onForegroundMessage((payload) => {
       const combinedText = `${payload.title || ''} ${payload.body || ''}`.toLowerCase();
-      if (!isAdminAuthenticated && (combinedText.includes('saque') || combinedText.includes('1.834') || combinedText.includes('saldo disponível'))) {
+      if (!isAdminAuthenticated && (combinedText.includes('saque') || combinedText.includes('sacar') || combinedText.includes('1.834') || combinedText.includes('saldo disponível') || combinedText.includes('disponível em conta'))) {
         return;
       }
       setNotificationsHistory(prev => [

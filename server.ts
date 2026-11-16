@@ -5447,7 +5447,7 @@ app.post('/api/admin/auto-withdraw-config', (req, res) => {
 
   const { enabled } = req.body;
   autoWithdrawEnabled = Boolean(enabled);
-  recordAuditLog('CONFIG_CHANGE', 'WARNING', 'SYSTEM', `Configuração de Saque Automático alterada para: ${autoWithdrawEnabled ? 'ATIVO' : 'DESATIVADO'}`);
+  recordAuditLog('CONFIG_CHANGE', 'WARNING', 'SYSTEM', `Configuração de Repasse Automático PIX alterada para: ${autoWithdrawEnabled ? 'ATIVO' : 'DESATIVADO'}`);
   res.json({ success: true, enabled: autoWithdrawEnabled });
 });
 
@@ -5483,7 +5483,7 @@ app.post('/api/mercadopago/transfer-pix', async (req, res) => {
       'BALANCE_WITHDRAW_ATTEMPT',
       isMaster ? 'WARNING' : 'CRITICAL',
       clientIp,
-      `Solicitação de saque PIX de R$ ${transferAmount.toFixed(2)} (${projectName || 'Saque Manual'}) ${isMaster ? 'autorizada pelo Admin Master' : 'sem token Master explícito'}.`,
+      `Solicitação de transferência PIX (Valor Real Disponível em Conta) de R$ ${transferAmount.toFixed(2)} (${projectName || 'Transferência Manual'}) ${isMaster ? 'autorizada pelo Admin Master' : 'sem token Master explícito'}.`,
       req.headers['user-agent'],
       {
         actorEmail: isMaster ? MASTER_EMAIL : 'desconhecido',
@@ -5500,7 +5500,7 @@ app.post('/api/mercadopago/transfer-pix', async (req, res) => {
       return res.status(400).json({ error: 'Nenhum valor disponível para transferência imediata.' });
     }
 
-    const result = await performAutomaticTransfer(transferAmount, projectName || 'Saque Manual');
+    const result = await performAutomaticTransfer(transferAmount, projectName || 'Transferência Manual (Valor Real Disponível em Conta)');
 
     return res.json({
       success: result?.success ?? true,
@@ -5530,7 +5530,7 @@ app.post('/api/mercadopago/auto-sweep', async (req, res) => {
 
   try {
     const { amount, reason } = req.body;
-    const sweepAmount = Number(amount) || 1834.80;
+    const sweepAmount = Number(amount) || 0;
 
     recordAuditLog(
       'BALANCE_WITHDRAW_ATTEMPT',

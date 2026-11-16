@@ -70,7 +70,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   onRequireAuth,
   onOpenInstallModal,
   onOpenWithdrawalModal,
-  adminWithdrawalAmount = 1834.80,
+  adminWithdrawalAmount = 0,
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);

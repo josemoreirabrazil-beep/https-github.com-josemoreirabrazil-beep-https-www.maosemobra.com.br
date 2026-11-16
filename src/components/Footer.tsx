@@ -51,7 +51,7 @@ export const Footer: React.FC<FooterProps> = ({
   isAdminAuthenticated,
   onOpenInstallModal,
   onOpenWithdrawalModal,
-  adminWithdrawalAmount = 1834.80,
+  adminWithdrawalAmount = 0,
 }) => {
   const laborCount = team.filter(m => {
     const isSupplier = m.role.toLowerCase().includes('loja') || m.role.toLowerCase().includes('madeireira') || m.role.toLowerCase().includes('depósito') || m.role.toLowerCase().includes('fornecedor');
