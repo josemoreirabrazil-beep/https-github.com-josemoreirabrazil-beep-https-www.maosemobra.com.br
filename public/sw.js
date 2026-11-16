@@ -1,7 +1,6 @@
 // Service Worker for "Mãos em Obra" PWA
-const CACHE_NAME = 'maos-em-obra-v2';
+const CACHE_NAME = 'maos-em-obra-v3';
 const PRECACHE_ASSETS = [
-  '/',
   '/manifest.json',
   '/icon.svg',
   '/pwa-192x192.png',
@@ -41,15 +40,18 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
 
-  // CRITICAL: NEVER cache API calls, Vite internals, node_modules, source code or hot reload queries
+  // CRITICAL: NEVER cache API calls, Vite internals, node_modules, source code, JS/CSS bundles or hot reload queries
   if (
     url.pathname.startsWith('/api/') ||
     url.pathname.includes('/node_modules/') ||
     url.pathname.includes('/@') ||
     url.pathname.includes('.vite') ||
+    url.pathname.startsWith('/assets/') ||
     url.pathname.endsWith('.ts') ||
     url.pathname.endsWith('.tsx') ||
     url.pathname.endsWith('.jsx') ||
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css') ||
     url.searchParams.has('v') ||
     url.searchParams.has('t') ||
     url.hostname === 'localhost' ||
@@ -58,12 +60,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Only cache same-origin static assets
+  // Always use Network-First for HTML navigation requests so updates deploy immediately
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  // Only cache same-origin static image/font assets
   if (url.origin === self.location.origin) {
     const isStaticAsset = url.pathname.match(/\.(png|jpg|jpeg|svg|gif|ico|woff2?|ttf|eot)$/i);
-    if (!isStaticAsset && event.request.mode !== 'navigate') {
+    if (!isStaticAsset) {
       return;
     }
+  } else {
+    return;
   }
 
   event.respondWith(
@@ -83,11 +95,6 @@ self.addEventListener('fetch', (event) => {
         });
 
         return networkResponse;
-      }).catch(() => {
-        // Offline fallback for navigation
-        if (event.request.mode === 'navigate') {
-          return caches.match('/');
-        }
       });
     })
   );
