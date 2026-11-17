@@ -391,33 +391,129 @@ export async function processMercadoPagoRedirectReturn(
 
 /**
  * Starts automatic real-time sync with webhook and receipts state
- * Polls every intervalMs for payment status updates on pending records
+ * Uses exponential backoff when there are no pending expenses (or on consecutive network failures)
+ * to minimize unnecessary network and processing load.
  */
 export function startAutomaticWebhookSync(options: {
   projectId: string;
   getPendingExpenseIds: () => string[];
   onExpenseApproved: (expenseId: string, amount: number) => void;
   intervalMs?: number;
+  baseIntervalMs?: number;
+  maxIntervalMs?: number;
+  backoffFactor?: number;
+  onBackoffChange?: (nextIntervalMs: number, idleCycles: number) => void;
 }): () => void {
-  const intervalTime = options.intervalMs || 10000;
+  const baseInterval = Math.max(1000, options.baseIntervalMs ?? options.intervalMs ?? 8000);
+  const maxInterval = Math.max(baseInterval, options.maxIntervalMs ?? 300000);
+  const backoffFactor = Math.max(1.1, options.backoffFactor ?? 2);
 
-  const timer = setInterval(async () => {
-    const pendingIds = options.getPendingExpenseIds();
-    if (!pendingIds || pendingIds.length === 0) return;
+  let currentInterval = baseInterval;
+  let idleCycles = 0;
+  let stopped = false;
+  let isPolling = false;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    for (const id of pendingIds) {
-      try {
-        const res = await fetch(`/api/mercadopago/payment-status/${encodeURIComponent(id)}`);
-        if (!res.ok) continue;
-        const data = await res.json();
-        if (data.found && data.status === 'approved') {
-          options.onExpenseApproved(id, data.amount || 0);
+  const scheduleNext = (delayMs: number) => {
+    if (stopped) return;
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(runPollCycle, delayMs);
+  };
+
+  const applyBackoff = () => {
+    idleCycles += 1;
+    currentInterval = Math.min(maxInterval, Math.round(currentInterval * backoffFactor));
+    options.onBackoffChange?.(currentInterval, idleCycles);
+  };
+
+  const resetBackoff = () => {
+    const changed = currentInterval !== baseInterval || idleCycles !== 0;
+    idleCycles = 0;
+    currentInterval = baseInterval;
+    if (changed) {
+      options.onBackoffChange?.(currentInterval, idleCycles);
+    }
+  };
+
+  const runPollCycle = async () => {
+    if (stopped || isPolling) return;
+    isPolling = true;
+
+    try {
+      const pendingIds = options.getPendingExpenseIds();
+
+      // Sem despesas pendentes: evita requisições e aumenta intervalo exponencialmente
+      if (!pendingIds || pendingIds.length === 0) {
+        applyBackoff();
+        return;
+      }
+
+      // Há despesas pendentes: retorna ao intervalo base se o último ciclo foi ocioso
+      let successfulRequests = 0;
+      let failedRequests = 0;
+
+      for (const id of pendingIds) {
+        if (stopped) break;
+        try {
+          const res = await fetch(`/api/mercadopago/payment-status/${encodeURIComponent(id)}`);
+          if (!res.ok) {
+            failedRequests += 1;
+            continue;
+          }
+          successfulRequests += 1;
+          const data = await res.json();
+          if (data.found && data.status === 'approved') {
+            options.onExpenseApproved(id, data.amount || 0);
+          }
+        } catch {
+          failedRequests += 1;
+          // Silent catch for background poll
         }
-      } catch {
-        // Silent catch for background poll
+      }
+
+      if (successfulRequests > 0) {
+        resetBackoff();
+      } else if (failedRequests > 0) {
+        applyBackoff();
+      }
+    } finally {
+      isPolling = false;
+      if (!stopped) {
+        scheduleNext(currentInterval);
       }
     }
-  }, intervalTime);
+  };
 
-  return () => clearInterval(timer);
+  const handleVisibilityChange = () => {
+    if (stopped || typeof document === 'undefined' || document.visibilityState !== 'visible') {
+      return;
+    }
+    const pendingIds = options.getPendingExpenseIds();
+    if (pendingIds && pendingIds.length > 0 && currentInterval > baseInterval) {
+      resetBackoff();
+      if (!isPolling) {
+        scheduleNext(baseInterval);
+      }
+    }
+  };
+
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
+
+  scheduleNext(currentInterval);
+
+  return () => {
+    stopped = true;
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
+  };
 }
+
