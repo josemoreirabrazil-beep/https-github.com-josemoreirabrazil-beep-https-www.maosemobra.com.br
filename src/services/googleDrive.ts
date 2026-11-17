@@ -1,4 +1,5 @@
 import { getAccessToken } from './firebaseAuth';
+import { getProjects, getExpenses, getDailyLogs, getPhases } from './storage';
 import type { DriveFileItem, Project, DailyLog, Expense, Phase } from '../types';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
@@ -184,7 +185,10 @@ export async function uploadBinaryFile(
   });
 
   if (!response.ok) {
-    throw new Error(`Erro ao fazer upload do arquivo: ${response.statusText}`);
+    if (response.status === 401) {
+      throw new Error('Sessão do Google Drive expirada. Reconecte sua conta Google e tente novamente.');
+    }
+    throw new Error(`Erro ao fazer upload do arquivo: ${response.statusText || response.status}`);
   }
 
   return await response.json();
@@ -283,3 +287,144 @@ ${expenses.map(e => `| ${e.description} | ${e.category} | ${e.supplier || '-'} |
 
   return { reportFile, backupFile };
 }
+
+export interface CloudBackupResult {
+  file: DriveFileItem;
+  fileName: string;
+  format: 'gzip' | 'json';
+  rawBytes: number;
+  compressedBytes: number;
+  savedPercent: number;
+  projectsCount: number;
+  phasesCount: number;
+  expensesCount: number;
+  rdosCount: number;
+  createdAt: string;
+  folderName: string;
+}
+
+export async function getOrCreateBackupFolder(): Promise<{ folderId: string; folderName: string }> {
+  const rootFolderId = await getOrCreateAppRootFolder();
+  const backupFolderName = 'Backups Compactados';
+  const existingId = await findFolderByName(backupFolderName, rootFolderId);
+  if (existingId) {
+    return { folderId: existingId, folderName: `Mãos em Obra - Projetos e Relatórios / ${backupFolderName}` };
+  }
+  const createdId = await createFolder(backupFolderName, rootFolderId);
+  return { folderId: createdId, folderName: `Mãos em Obra - Projetos e Relatórios / ${backupFolderName}` };
+}
+
+function mergeById<T extends { id: string }>(primary: T[], secondary: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const item of secondary) {
+    if (item && item.id) map.set(item.id, item);
+  }
+  for (const item of primary) {
+    if (item && item.id) map.set(item.id, item);
+  }
+  return Array.from(map.values());
+}
+
+async function compressTextArchive(
+  jsonText: string
+): Promise<{ blob: Blob; format: 'gzip' | 'json'; mimeType: string; extension: string }> {
+  const utf8Bytes = new TextEncoder().encode(jsonText);
+  const rawBlob = new Blob([utf8Bytes], { type: 'application/json;charset=utf-8' });
+
+  if (typeof CompressionStream !== 'undefined') {
+    try {
+      const compressedStream = rawBlob.stream().pipeThrough(new CompressionStream('gzip'));
+      const compressedBlob = await new Response(compressedStream).blob();
+      return {
+        blob: new Blob([compressedBlob], { type: 'application/gzip' }),
+        format: 'gzip',
+        mimeType: 'application/gzip',
+        extension: 'json.gz',
+      };
+    } catch (err) {
+      console.warn('Falha ao compactar com CompressionStream gzip; usando JSON minificado:', err);
+    }
+  }
+
+  return {
+    blob: rawBlob,
+    format: 'json',
+    mimeType: 'application/json',
+    extension: 'json',
+  };
+}
+
+export async function createCompressedCloudBackupToDrive(liveData?: {
+  activeProject?: Project;
+  allProjects?: Project[];
+  activePhases?: Phase[];
+  activeExpenses?: Expense[];
+  activeRdos?: DailyLog[];
+}): Promise<CloudBackupResult> {
+  const storedProjects = getProjects();
+  const candidateProjects = mergeById<Project>(
+    [
+      ...(liveData?.activeProject ? [liveData.activeProject] : []),
+      ...(liveData?.allProjects || []),
+    ],
+    storedProjects
+  );
+
+  const storedPhases = getPhases();
+  const storedExpenses = getExpenses();
+  const storedRdos = getDailyLogs();
+
+  const allPhases = mergeById<Phase>(liveData?.activePhases || [], storedPhases);
+  const allExpenses = mergeById<Expense>(liveData?.activeExpenses || [], storedExpenses);
+  const allRdos = mergeById<DailyLog>(liveData?.activeRdos || [], storedRdos);
+
+  const now = new Date();
+  const createdAt = now.toISOString();
+  const datePart = createdAt.split('T')[0];
+  const timePart = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const payload = {
+    schemaVersion: '1.0.0',
+    app: 'Mãos em Obra - Gestão de Construção Civil',
+    createdAt,
+    activeProjectId: liveData?.activeProject?.id || candidateProjects[0]?.id || '',
+    summary: {
+      projectsCount: candidateProjects.length,
+      phasesCount: allPhases.length,
+      expensesCount: allExpenses.length,
+      rdosCount: allRdos.length,
+    },
+    projects: candidateProjects,
+    phases: allPhases,
+    expenses: allExpenses,
+    rdos: allRdos,
+  };
+
+  const jsonText = JSON.stringify(payload);
+  const rawBytes = new TextEncoder().encode(jsonText).byteLength;
+  const archive = await compressTextArchive(jsonText);
+  const fileName = `Backup_Compactado_MaosEmObra_${datePart}_${timePart}.${archive.extension}`;
+  const backupFile = new File([archive.blob], fileName, { type: archive.mimeType });
+
+  const { folderId, folderName } = await getOrCreateBackupFolder();
+  const uploadedFile = await uploadBinaryFile(backupFile, folderId);
+
+  const compressedBytes = backupFile.size;
+  const savedPercent = rawBytes > 0 ? Math.max(0, Math.round((1 - compressedBytes / rawBytes) * 100)) : 0;
+
+  return {
+    file: uploadedFile,
+    fileName,
+    format: archive.format,
+    rawBytes,
+    compressedBytes,
+    savedPercent,
+    projectsCount: candidateProjects.length,
+    phasesCount: allPhases.length,
+    expensesCount: allExpenses.length,
+    rdosCount: allRdos.length,
+    createdAt,
+    folderName,
+  };
+}
+

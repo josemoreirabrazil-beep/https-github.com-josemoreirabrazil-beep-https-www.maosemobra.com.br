@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { 
   Wallet, 
   Plus, 
@@ -37,9 +37,15 @@ import {
 import type { Expense, ExpenseCategory, PaymentStatus, Project, ProposalServiceItem, LogisticsQuote, TransactionType } from '../types';
 import { uploadTextFile, getOrCreateProjectFolder } from '../services/googleDrive';
 import { BLANK_SERVICE_TEMPLATES, generateBlankExpensesForProject } from '../data/serviceTemplates';
-import { EditBudgetModal } from './EditBudgetModal';
-import { ServiceProposalModal } from './ServiceProposalModal';
-import { MercadoPagoModal } from './MercadoPagoModal';
+const EditBudgetModal = lazy(() =>
+  import('./EditBudgetModal').then((m) => ({ default: m.EditBudgetModal }))
+);
+const ServiceProposalModal = lazy(() =>
+  import('./ServiceProposalModal').then((m) => ({ default: m.ServiceProposalModal }))
+);
+const MercadoPagoModal = lazy(() =>
+  import('./MercadoPagoModal').then((m) => ({ default: m.MercadoPagoModal }))
+);
 import { 
   createMercadoPagoPreference, 
   createMercadoPagoPix, 
@@ -1402,36 +1408,48 @@ export const FinancialView: React.FC<FinancialViewProps> = ({
         </div>
       )}
 
-      {/* Edit Budget Modal */}
-      <EditBudgetModal
-        isOpen={isEditBudgetModalOpen}
-        onClose={() => setIsEditBudgetModalOpen(false)}
-        project={project}
-        expenses={expenses}
-        onSaveBudget={handleSaveBudget}
-      />
+      {/* Edit Budget Modal (Lazy Loaded) */}
+      {isEditBudgetModalOpen && (
+        <Suspense fallback={null}>
+          <EditBudgetModal
+            isOpen={isEditBudgetModalOpen}
+            onClose={() => setIsEditBudgetModalOpen(false)}
+            project={project}
+            expenses={expenses}
+            onSaveBudget={handleSaveBudget}
+          />
+        </Suspense>
+      )}
 
-      {/* Service Proposal Generator Modal */}
-      <ServiceProposalModal
-        isOpen={isProposalModalOpen}
-        onClose={() => setIsProposalModalOpen(false)}
-        project={project}
-        onApplyProposal={handleApplyProposal}
-      />
+      {/* Service Proposal Generator Modal (Lazy Loaded) */}
+      {isProposalModalOpen && (
+        <Suspense fallback={null}>
+          <ServiceProposalModal
+            isOpen={isProposalModalOpen}
+            onClose={() => setIsProposalModalOpen(false)}
+            project={project}
+            onApplyProposal={handleApplyProposal}
+          />
+        </Suspense>
+      )}
 
-      {/* Mercado Pago Integrated Payment Modal */}
-      <MercadoPagoModal
-        isOpen={isMpModalOpen}
-        onClose={() => setIsMpModalOpen(false)}
-        title={mpPaymentTarget.title}
-        amount={mpPaymentTarget.amount}
-        requirePlanSelection={mpPaymentTarget.requirePlanSelection}
-        description={mpPaymentTarget.description}
-        payerName={mpPaymentTarget.payerName}
-        payerEmail={project.clientEmail || 'cliente@obra.com.br'}
-        referenceId={mpPaymentTarget.expenseId || `proj-${project.id}-${Date.now()}`}
-        onPaymentSuccess={handleMercadoPagoPaymentSuccess}
-      />
+      {/* Mercado Pago Integrated Payment Modal (Lazy Loaded) */}
+      {isMpModalOpen && (
+        <Suspense fallback={null}>
+          <MercadoPagoModal
+            isOpen={isMpModalOpen}
+            onClose={() => setIsMpModalOpen(false)}
+            title={mpPaymentTarget.title}
+            amount={mpPaymentTarget.amount}
+            requirePlanSelection={mpPaymentTarget.requirePlanSelection}
+            description={mpPaymentTarget.description}
+            payerName={mpPaymentTarget.payerName}
+            payerEmail={project.clientEmail || 'cliente@obra.com.br'}
+            referenceId={mpPaymentTarget.expenseId || `proj-${project.id}-${Date.now()}`}
+            onPaymentSuccess={handleMercadoPagoPaymentSuccess}
+          />
+        </Suspense>
+      )}
 
       {/* Sync Revenues Result Modal */}
       {syncResultModal?.open && (

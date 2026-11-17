@@ -13,7 +13,6 @@ import {
   Calculator, 
   FolderOpen, 
   Bell, 
-  Send, 
   ArrowRight,
   Sparkles
 } from 'lucide-react';
@@ -81,7 +80,6 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
       { id: 'timeline', title: 'Cronograma & Fases', icon: Calendar, desc: 'Fases da obra e prazos' },
       { id: 'reports', title: 'Laudos Técnicos & ARTs', icon: ShieldCheck, desc: 'Documentos e laudos de engenharia' },
       { id: 'team', title: 'Equipe & Fornecedores', icon: Users, desc: 'Profissionais e parceiros da obra' },
-      { id: 'invitations', title: 'Envio em Massa de Convites', icon: Send, desc: 'Automação para 800+ contatos corporativos' },
       { id: 'opportunities', title: 'Oportunidades de Obras', icon: Briefcase, desc: 'Mural de licitações' },
       { id: 'calculator', title: 'Calculadora de Materiais & IA', icon: Calculator, desc: 'Estimativas' },
       { id: 'drive', title: 'Google Drive Explorer', icon: FolderOpen, desc: 'Arquivos e pastas' },

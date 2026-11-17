@@ -19,7 +19,6 @@ import {
   UserCheck,
   Sparkles,
   LogIn,
-  Send,
   BellRing
 } from 'lucide-react';
 import { LanguageSelector } from './LanguageSelector';
@@ -98,15 +97,6 @@ export const Navigation: React.FC<NavigationProps> = ({
       description: 'Emissão de ART (CREA), RRT, Laudos e Logo do Cliente',
       icon: FileCheck2,
       badge: isAdminAuthenticated ? 'Admin' : hasProAccess ? 'Pro' : techDocsCount > 0 ? `${techDocsCount}` : 'Admin',
-      badgeColor: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-black',
-    },
-    {
-      id: 'invitations' as NavTab,
-      label: 'Automação de Convites em Massa',
-      description: 'Disparo automático em lote (WhatsApp, E-mail e CCO) p/ 300+ construtoras',
-      icon: Send,
-      highlight: true,
-      badge: 'Automação 300+',
       badgeColor: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-black',
     },
     {
@@ -429,29 +419,6 @@ export const Navigation: React.FC<NavigationProps> = ({
                   : 'bg-emerald-500/20 text-emerald-300'
               }`}>
                 {isAdminAuthenticated ? 'Admin' : hasProAccess ? 'Pro' : 'Admin'}
-              </span>
-            </button>
-
-            {/* Pinned Direct Mass Invitations Automation Button */}
-            <button
-              type="button"
-              data-testid="nav-mass-invitations-btn"
-              onClick={() => onTabChange('invitations')}
-              title="Automação dos Disparos de Convites em Massa (Fila Automática WhatsApp, E-mail e CCO p/ 300+ Construtoras)"
-              className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl text-xs font-black border transition shadow-xs cursor-pointer whitespace-nowrap shrink-0 active:scale-95 ${
-                activeTab === 'invitations'
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-500 shadow-emerald-500/20'
-                  : 'bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-slate-800 text-emerald-700 dark:text-emerald-400 border-emerald-500/60'
-              }`}
-            >
-              <Send className={`w-4 h-4 shrink-0 ${activeTab === 'invitations' ? 'text-slate-950' : 'text-emerald-500'}`} />
-              <span>Convites em Massa</span>
-              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
-                activeTab === 'invitations'
-                  ? 'bg-slate-950/15 text-slate-950'
-                  : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
-              }`}>
-                Automação
               </span>
             </button>
           </div>

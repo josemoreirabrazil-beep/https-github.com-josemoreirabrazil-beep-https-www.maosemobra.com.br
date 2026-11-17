@@ -1,28 +1,79 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Header } from './components/Header';
 import { Navigation, type NavTab, type UserAccessRole } from './components/Navigation';
-import { DashboardView } from './components/DashboardView';
-import { DailyLogView } from './components/DailyLogView';
-import { FinancialView } from './components/FinancialView';
-import { TimelineView } from './components/TimelineView';
-import { CalculatorAndAIView } from './components/CalculatorAndAIView';
-import { DriveExplorerView } from './components/DriveExplorerView';
-import { TeamSuppliersView } from './components/TeamSuppliersView';
-import { ServiceRequestsView } from './components/ServiceRequestsView';
-import { OpportunitiesView } from './components/OpportunitiesView';
-import { BatchInvitationsView } from './components/BatchInvitationsView';
-import { TechnicalReportsView } from './components/TechnicalReportsView';
-import { NotificationSettingsView } from './components/NotificationSettingsView';
-import { SafetyWorkPermitAndDdsView } from './components/SafetyWorkPermitAndDdsView';
-import { AdminMasterView } from './components/AdminMasterView';
-import { AdminLoginModal } from './components/AdminLoginModal';
 import { Footer } from './components/Footer';
-import { ProjectModal } from './components/ProjectModal';
-import { InstallAppModal } from './components/InstallAppModal';
-import { WithdrawalModal } from './components/WithdrawalModal';
-import { MercadoPagoModal } from './components/MercadoPagoModal';
-import { GlobalSearchModal } from './components/GlobalSearchModal';
-import { Download, CheckCircle2, X, Megaphone, ExternalLink, Lock, Briefcase, Sparkles, ShieldCheck, LogIn } from 'lucide-react';
+import { Download, CheckCircle2, X, Megaphone, ExternalLink, Lock, Briefcase, Sparkles, ShieldCheck, LogIn, Loader2 } from 'lucide-react';
+
+const DashboardView = lazy(() =>
+  import('./components/DashboardView').then((m) => ({ default: m.DashboardView }))
+);
+const DailyLogView = lazy(() =>
+  import('./components/DailyLogView').then((m) => ({ default: m.DailyLogView }))
+);
+const FinancialView = lazy(() =>
+  import('./components/FinancialView').then((m) => ({ default: m.FinancialView }))
+);
+const TimelineView = lazy(() =>
+  import('./components/TimelineView').then((m) => ({ default: m.TimelineView }))
+);
+const CalculatorAndAIView = lazy(() =>
+  import('./components/CalculatorAndAIView').then((m) => ({ default: m.CalculatorAndAIView }))
+);
+const DriveExplorerView = lazy(() =>
+  import('./components/DriveExplorerView').then((m) => ({ default: m.DriveExplorerView }))
+);
+const TeamSuppliersView = lazy(() =>
+  import('./components/TeamSuppliersView').then((m) => ({ default: m.TeamSuppliersView }))
+);
+const ServiceRequestsView = lazy(() =>
+  import('./components/ServiceRequestsView').then((m) => ({ default: m.ServiceRequestsView }))
+);
+const OpportunitiesView = lazy(() =>
+  import('./components/OpportunitiesView').then((m) => ({ default: m.OpportunitiesView }))
+);
+const BatchInvitationsView = lazy(() =>
+  import('./components/BatchInvitationsView').then((m) => ({ default: m.BatchInvitationsView }))
+);
+const TechnicalReportsView = lazy(() =>
+  import('./components/TechnicalReportsView').then((m) => ({ default: m.TechnicalReportsView }))
+);
+const NotificationSettingsView = lazy(() =>
+  import('./components/NotificationSettingsView').then((m) => ({ default: m.NotificationSettingsView }))
+);
+const SafetyWorkPermitAndDdsView = lazy(() =>
+  import('./components/SafetyWorkPermitAndDdsView').then((m) => ({ default: m.SafetyWorkPermitAndDdsView }))
+);
+const AdminMasterView = lazy(() =>
+  import('./components/AdminMasterView').then((m) => ({ default: m.AdminMasterView }))
+);
+
+const AdminLoginModal = lazy(() =>
+  import('./components/AdminLoginModal').then((m) => ({ default: m.AdminLoginModal }))
+);
+const ProjectModal = lazy(() =>
+  import('./components/ProjectModal').then((m) => ({ default: m.ProjectModal }))
+);
+const InstallAppModal = lazy(() =>
+  import('./components/InstallAppModal').then((m) => ({ default: m.InstallAppModal }))
+);
+const WithdrawalModal = lazy(() =>
+  import('./components/WithdrawalModal').then((m) => ({ default: m.WithdrawalModal }))
+);
+const MercadoPagoModal = lazy(() =>
+  import('./components/MercadoPagoModal').then((m) => ({ default: m.MercadoPagoModal }))
+);
+const GlobalSearchModal = lazy(() =>
+  import('./components/GlobalSearchModal').then((m) => ({ default: m.GlobalSearchModal }))
+);
+
+const ViewLoadingFallback: React.FC = () => (
+  <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm p-10 flex flex-col items-center justify-center gap-3 min-h-[280px]">
+    <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+      Carregando módulo da obra...
+    </span>
+  </div>
+);
 import { 
   parseMercadoPagoRedirectParams, 
   processMercadoPagoRedirectReturn, 
@@ -412,6 +463,15 @@ export default function App() {
   const handleTabChange = (tab: NavTab, categoryFilter?: 'all' | 'labor' | 'supplier' | 'technical') => {
     if (categoryFilter) {
       setTeamCategoryFilter(categoryFilter);
+    }
+    if (tab === 'invitations') {
+      if (adminUser && isAdminMaster) {
+        setActiveTab('invitations');
+      } else {
+        setIsAdminLoginModalOpen(true);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
     if (tab === 'admin') {
       if (adminUser) {
@@ -894,9 +954,11 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+        <Suspense fallback={<ViewLoadingFallback />}>
         {activeTab === 'dashboard' && (
           <DashboardView
             project={currentProject}
+            allProjects={projects}
             phases={phases}
             rdos={rdos}
             expenses={expenses}
@@ -992,7 +1054,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'invitations' && (
+        {activeTab === 'invitations' && adminUser && isAdminMaster && (
           <BatchInvitationsView
             onNavigateToOpportunities={() => setActiveTab('opportunities')}
           />
@@ -1115,6 +1177,7 @@ export default function App() {
             onNavigateToFinancial={() => handleTabChange('financial')}
           />
         )}
+        </Suspense>
       </main>
 
       {/* Footer with Comprehensive Quick Navigation Links */}
@@ -1152,146 +1215,172 @@ export default function App() {
         </span>
       </button>
 
-      {/* Download / Install App Modal */}
-      <InstallAppModal
-        isOpen={isInstallModalOpen}
-        onClose={() => setIsInstallModalOpen(false)}
-      />
-
-      {/* Admin Master Login Modal */}
-      <AdminLoginModal
-        isOpen={isAdminLoginModalOpen}
-        onClose={() => setIsAdminLoginModalOpen(false)}
-        onSuccess={handleAdminLoginSuccess}
-      />
-
-      {/* New Project Modal */}
-      <ProjectModal
-        isOpen={isNewProjectModalOpen}
-        onClose={() => setIsNewProjectModalOpen(false)}
-        onSave={handleSaveProject}
-      />
-
-      {/* Edit Project Modal */}
-      <ProjectModal
-        isOpen={isEditProjectModalOpen}
-        onClose={() => setIsEditProjectModalOpen(false)}
-        onSave={handleSaveProject}
-        initialData={currentProject}
-      />
-
-      {/* Modal Oficial de Valor Real Disponível em Conta p/ Mercado Pago — Exclusivo Admin Master Global */}
-      {isAdminMaster && (
-        <WithdrawalModal
-          isOpen={isWithdrawalModalOpen}
-          onClose={() => setIsWithdrawalModalOpen(false)}
-          isAdminAuthenticated={isAdminMaster}
-          availableAmount={adminWithdrawalAmount}
-          onSuccess={(withdrawnAmount) => {
-            setAdminWithdrawalAmount((prev) => Math.max(0, Number((prev - withdrawnAmount).toFixed(2))));
-          }}
-        />
+      {/* Download / Install App Modal (Lazy Loaded) */}
+      {isInstallModalOpen && (
+        <Suspense fallback={null}>
+          <InstallAppModal
+            isOpen={isInstallModalOpen}
+            onClose={() => setIsInstallModalOpen(false)}
+          />
+        </Suspense>
       )}
 
-      {/* Checkout Mercado Pago para Seleção de Planos (Mensal, Anual Construtoras ou Pro) */}
-      <MercadoPagoModal
-        isOpen={isProUpgradeModalOpen}
-        onClose={() => setIsProUpgradeModalOpen(false)}
-        title={
-          upgradeModalMode === 'pro-laudo'
-            ? `Plano Mensal Pro — Emissão de Laudos (${currentProject.title})`
-            : `Escolher Plano Pago — ${currentProject.title}`
-        }
-        amount={upgradeModalMode === 'pro-laudo' ? 29.90 : 0}
-        selectedPlanId={upgradeModalMode === 'pro-laudo' ? 'plan-001' : undefined}
-        requirePlanSelection={upgradeModalMode === 'choose-plan'}
-        description={
-          upgradeModalMode === 'pro-laudo'
-            ? 'Assinatura Mensal Recorrente Plano Pro (R$ 29,90/mês) — Libera emissão de Laudos Técnicos e Vistorias'
-            : 'Escolha um plano mensal (R$ 25,00, R$ 29,90, R$ 49,90) ou o Plano Anual Construtor (R$ 499,00/ano) para liberar todos os serviços'
-        }
-        payerName={currentProject.clientName || 'Assinante Mãos em Obra'}
-        payerEmail={currentProject.clientEmail || 'cliente@maosemobra.com.br'}
-        referenceId={`SUB-${upgradeModalMode === 'pro-laudo' ? 'PRO' : 'PLAN'}-${currentProject.id}-${Date.now()}`}
-        onPaymentSuccess={(paymentInfo) => {
-          const nameLower = (paymentInfo.planName || '').toLowerCase();
-          let chosen: {
-            planId: string;
-            planCode: string;
-            planName: string;
-            price: number;
-            billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
-          } = {
-            planId: 'plan-004',
-            planCode: 'Gratuito Lançamento',
-            planName: 'Cadastro Gratuito',
-            price: 0,
-            billingCycle: 'Gratuito',
-          };
-          if (nameLower.includes('anual') || Math.abs(paymentInfo.amount - 499.00) < 0.5 || paymentInfo.amount >= 400) {
-            chosen = {
-              planId: 'plan-005',
-              planCode: 'Anual Construtor',
-              planName: 'Anual Construtor',
-              price: 499.00,
-              billingCycle: 'Anual',
-            };
-          } else if (Math.abs(paymentInfo.amount - 29.90) < 0.05 || nameLower.includes('pro')) {
-            chosen = {
-              planId: 'plan-001',
-              planCode: 'Mensal Pro',
-              planName: 'Mensal Pro',
-              price: 29.90,
-              billingCycle: 'Mensal',
-            };
-          } else if (Math.abs(paymentInfo.amount - 49.90) < 0.05 || nameLower.includes('construtor')) {
-            chosen = {
-              planId: 'plan-002',
-              planCode: 'Mensal Construtor',
-              planName: 'Mensal Construtor',
-              price: 49.90,
-              billingCycle: 'Mensal',
-            };
-          } else if (Math.abs(paymentInfo.amount - 25.00) < 0.05 || nameLower.includes('básico')) {
-            chosen = {
-              planId: 'plan-003',
-              planCode: 'Mensal Básico',
-              planName: 'Mensal Básico',
-              price: 25.00,
-              billingCycle: 'Mensal',
-            };
-          }
-          const updated = setActiveUserSubscription(chosen);
-          setActiveSubscription(updated);
-          syncEnrolledSubscriberToServer({
-            subscriberName: user?.displayName || currentProject.clientName || 'Assinante Mãos em Obra',
-            subscriberEmail: user?.email || currentProject.clientEmail || '',
-            subscriberRole: chosen.planCode.includes('Construtor') ? 'Construtora / Empreiteiro' : 'Técnico / Projetista',
-            planType: chosen.planCode,
-            amount: chosen.price,
-            method: paymentInfo.method === 'pix' ? 'PIX' : 'Mercado Pago',
-            transactionId: paymentInfo.paymentId,
-            mpPaymentId: paymentInfo.paymentId,
-            mpVerifiedStatus: chosen.price > 0 ? 'approved' : undefined,
-          });
-        }}
-      />
+      {/* Admin Master Login Modal (Lazy Loaded) */}
+      {isAdminLoginModalOpen && (
+        <Suspense fallback={null}>
+          <AdminLoginModal
+            isOpen={isAdminLoginModalOpen}
+            onClose={() => setIsAdminLoginModalOpen(false)}
+            onSuccess={handleAdminLoginSuccess}
+          />
+        </Suspense>
+      )}
 
-      {/* 🔍 Global Search Modal */}
-      <GlobalSearchModal
-        isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
-        projects={projects}
-        currentProject={currentProject}
-        onSelectProject={(id) => setCurrentProjectId(id)}
-        rdos={rdos}
-        expenses={expenses}
-        phases={phases}
-        team={team}
-        serviceRequests={serviceRequests}
-        techDocs={techDocs}
-        onNavigate={handleTabChange}
-      />
+      {/* New Project Modal (Lazy Loaded) */}
+      {isNewProjectModalOpen && (
+        <Suspense fallback={null}>
+          <ProjectModal
+            isOpen={isNewProjectModalOpen}
+            onClose={() => setIsNewProjectModalOpen(false)}
+            onSave={handleSaveProject}
+          />
+        </Suspense>
+      )}
+
+      {/* Edit Project Modal (Lazy Loaded) */}
+      {isEditProjectModalOpen && (
+        <Suspense fallback={null}>
+          <ProjectModal
+            isOpen={isEditProjectModalOpen}
+            onClose={() => setIsEditProjectModalOpen(false)}
+            onSave={handleSaveProject}
+            initialData={currentProject}
+          />
+        </Suspense>
+      )}
+
+      {/* Modal Oficial de Valor Real Disponível em Conta p/ Mercado Pago — Exclusivo Admin Master Global */}
+      {isAdminMaster && isWithdrawalModalOpen && (
+        <Suspense fallback={null}>
+          <WithdrawalModal
+            isOpen={isWithdrawalModalOpen}
+            onClose={() => setIsWithdrawalModalOpen(false)}
+            isAdminAuthenticated={isAdminMaster}
+            availableAmount={adminWithdrawalAmount}
+            onSuccess={(withdrawnAmount) => {
+              setAdminWithdrawalAmount((prev) => Math.max(0, Number((prev - withdrawnAmount).toFixed(2))));
+            }}
+          />
+        </Suspense>
+      )}
+
+      {/* Checkout Mercado Pago para Seleção de Planos (Lazy Loaded) */}
+      {isProUpgradeModalOpen && (
+        <Suspense fallback={null}>
+          <MercadoPagoModal
+            isOpen={isProUpgradeModalOpen}
+            onClose={() => setIsProUpgradeModalOpen(false)}
+            title={
+              upgradeModalMode === 'pro-laudo'
+                ? `Plano Mensal Pro — Emissão de Laudos (${currentProject.title})`
+                : `Escolher Plano Pago — ${currentProject.title}`
+            }
+            amount={upgradeModalMode === 'pro-laudo' ? 29.90 : 0}
+            selectedPlanId={upgradeModalMode === 'pro-laudo' ? 'plan-001' : undefined}
+            requirePlanSelection={upgradeModalMode === 'choose-plan'}
+            description={
+              upgradeModalMode === 'pro-laudo'
+                ? 'Assinatura Mensal Recorrente Plano Pro (R$ 29,90/mês) — Libera emissão de Laudos Técnicos e Vistorias'
+                : 'Escolha um plano mensal (R$ 25,00, R$ 29,90, R$ 49,90) ou o Plano Anual Construtor (R$ 499,00/ano) para liberar todos os serviços'
+            }
+            payerName={currentProject.clientName || 'Assinante Mãos em Obra'}
+            payerEmail={currentProject.clientEmail || 'cliente@maosemobra.com.br'}
+            referenceId={`SUB-${upgradeModalMode === 'pro-laudo' ? 'PRO' : 'PLAN'}-${currentProject.id}-${Date.now()}`}
+            onPaymentSuccess={(paymentInfo) => {
+              const nameLower = (paymentInfo.planName || '').toLowerCase();
+              let chosen: {
+                planId: string;
+                planCode: string;
+                planName: string;
+                price: number;
+                billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
+              } = {
+                planId: 'plan-004',
+                planCode: 'Gratuito Lançamento',
+                planName: 'Cadastro Gratuito',
+                price: 0,
+                billingCycle: 'Gratuito',
+              };
+              if (nameLower.includes('anual') || Math.abs(paymentInfo.amount - 499.00) < 0.5 || paymentInfo.amount >= 400) {
+                chosen = {
+                  planId: 'plan-005',
+                  planCode: 'Anual Construtor',
+                  planName: 'Anual Construtor',
+                  price: 499.00,
+                  billingCycle: 'Anual',
+                };
+              } else if (Math.abs(paymentInfo.amount - 29.90) < 0.05 || nameLower.includes('pro')) {
+                chosen = {
+                  planId: 'plan-001',
+                  planCode: 'Mensal Pro',
+                  planName: 'Mensal Pro',
+                  price: 29.90,
+                  billingCycle: 'Mensal',
+                };
+              } else if (Math.abs(paymentInfo.amount - 49.90) < 0.05 || nameLower.includes('construtor')) {
+                chosen = {
+                  planId: 'plan-002',
+                  planCode: 'Mensal Construtor',
+                  planName: 'Mensal Construtor',
+                  price: 49.90,
+                  billingCycle: 'Mensal',
+                };
+              } else if (Math.abs(paymentInfo.amount - 25.00) < 0.05 || nameLower.includes('básico')) {
+                chosen = {
+                  planId: 'plan-003',
+                  planCode: 'Mensal Básico',
+                  planName: 'Mensal Básico',
+                  price: 25.00,
+                  billingCycle: 'Mensal',
+                };
+              }
+              const updated = setActiveUserSubscription(chosen);
+              setActiveSubscription(updated);
+              syncEnrolledSubscriberToServer({
+                subscriberName: user?.displayName || currentProject.clientName || 'Assinante Mãos em Obra',
+                subscriberEmail: user?.email || currentProject.clientEmail || '',
+                subscriberRole: chosen.planCode.includes('Construtor') ? 'Construtora / Empreiteiro' : 'Técnico / Projetista',
+                planType: chosen.planCode,
+                amount: chosen.price,
+                method: paymentInfo.method === 'pix' ? 'PIX' : 'Mercado Pago',
+                transactionId: paymentInfo.paymentId,
+                mpPaymentId: paymentInfo.paymentId,
+                mpVerifiedStatus: chosen.price > 0 ? 'approved' : undefined,
+              });
+            }}
+          />
+        </Suspense>
+      )}
+
+      {/* 🔍 Global Search Modal (Lazy Loaded) */}
+      {isSearchModalOpen && (
+        <Suspense fallback={null}>
+          <GlobalSearchModal
+            isOpen={isSearchModalOpen}
+            onClose={() => setIsSearchModalOpen(false)}
+            projects={projects}
+            currentProject={currentProject}
+            onSelectProject={(id) => setCurrentProjectId(id)}
+            rdos={rdos}
+            expenses={expenses}
+            phases={phases}
+            team={team}
+            serviceRequests={serviceRequests}
+            techDocs={techDocs}
+            onNavigate={handleTabChange}
+          />
+        </Suspense>
+      )}
 
     </div>
   );

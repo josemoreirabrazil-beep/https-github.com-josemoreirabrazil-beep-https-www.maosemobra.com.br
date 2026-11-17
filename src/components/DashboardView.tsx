@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { 
   Building2, 
   DollarSign, 
@@ -29,23 +29,38 @@ import {
   Activity,
   RefreshCw,
   Briefcase,
-  Send,
   ExternalLink,
   FileCheck2,
   Crown,
   Repeat,
-  Lock
+  Lock,
+  UploadCloud,
+  Archive
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase, TeamMemberOrSupplier, ServiceRequest, ProjectGoal, AdminMasterUser, SubscriptionPlanPricing, RealSubscribersStatusResponse, SubscriberCashflowSummary } from '../types';
 import type { NavTab } from './Navigation';
-import { MercadoPagoModal } from './MercadoPagoModal';
-import { PreConstructionChecklist } from './PreConstructionChecklist';
 import { ProjectGoals } from './ProjectGoals';
+import { SmartGoalsAdvisor } from './SmartGoalsAdvisor';
 import { ProjectStatusSummary } from './ProjectStatusSummary';
-import { ExpenseCategoryDonutChart } from './ExpenseCategoryDonutChart';
-import { ConsolidatedReportCard } from './ConsolidatedReportCard';
-import { ProjectPhotoGallery } from './ProjectPhotoGallery';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+
+const MercadoPagoModal = lazy(() =>
+  import('./MercadoPagoModal').then((m) => ({ default: m.MercadoPagoModal }))
+);
+const PreConstructionChecklist = lazy(() =>
+  import('./PreConstructionChecklist').then((m) => ({ default: m.PreConstructionChecklist }))
+);
+const ExpenseCategoryDonutChart = lazy(() =>
+  import('./ExpenseCategoryDonutChart').then((m) => ({ default: m.ExpenseCategoryDonutChart }))
+);
+const MonthlyBudgetBarChart = lazy(() =>
+  import('./MonthlyBudgetBarChart').then((m) => ({ default: m.MonthlyBudgetBarChart }))
+);
+const ConsolidatedReportCard = lazy(() =>
+  import('./ConsolidatedReportCard').then((m) => ({ default: m.ConsolidatedReportCard }))
+);
+const ProjectPhotoGallery = lazy(() =>
+  import('./ProjectPhotoGallery').then((m) => ({ default: m.ProjectPhotoGallery }))
+);
 import {
   fetchSubscribersCashflow,
   fetchSubscriptionPlans,
@@ -70,10 +85,13 @@ import {
   type RevenueMilestone,
   type AdminMilestoneNotification,
 } from '../services/revenueMilestones';
+import { createCompressedCloudBackupToDrive, type CloudBackupResult } from '../services/googleDrive';
+import { getCachedGoogleToken, googleSignIn } from '../services/firebaseAuth';
 import confetti from 'canvas-confetti';
 
 interface DashboardViewProps {
   project: Project;
+  allProjects?: Project[];
   phases: Phase[];
   rdos: DailyLog[];
   expenses: Expense[];
@@ -131,6 +149,59 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
   const [isSavingMilestone, setIsSavingMilestone] = useState(false);
   const [isRefreshingSubscribers, setIsRefreshingSubscribers] = useState(false);
   const [subscriberStatusFilter, setSubscriberStatusFilter] = useState<'all' | 'active_paid' | 'active_free' | 'pending' | 'mp_live'>('all');
+
+  const CLOUD_BACKUP_META_KEY = 'maos_em_obra_last_cloud_backup';
+  const [isBackingUpToCloud, setIsBackingUpToCloud] = useState(false);
+  const [cloudBackupError, setCloudBackupError] = useState<string | null>(null);
+  const [lastCloudBackup, setLastCloudBackup] = useState<CloudBackupResult | null>(() => {
+    try {
+      const raw = localStorage.getItem(CLOUD_BACKUP_META_KEY);
+      return raw ? (JSON.parse(raw) as CloudBackupResult) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const formatBackupBytes = (bytes: number): string => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  const handleCloudBackup = async () => {
+    setCloudBackupError(null);
+    setIsBackingUpToCloud(true);
+    try {
+      if (!getCachedGoogleToken()) {
+        await googleSignIn();
+      }
+      const result = await createCompressedCloudBackupToDrive({
+        activeProject: project,
+        allProjects: props.allProjects,
+        activePhases: phases,
+        activeExpenses: expenses,
+        activeRdos: rdos,
+      });
+      setLastCloudBackup(result);
+      try {
+        localStorage.setItem(CLOUD_BACKUP_META_KEY, JSON.stringify(result));
+      } catch {
+        // Ignore storage quota issues for metadata receipt
+      }
+      confetti({ particleCount: 45, spread: 55, origin: { y: 0.7 } });
+    } catch (err: any) {
+      const code = err?.code || '';
+      const rawMsg = err?.message || 'Não foi possível concluir o backup compactado no Google Drive.';
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        setCloudBackupError('Conexão com Google cancelada. Clique em "Cloud Backup (.gz)" para tentar novamente.');
+      } else {
+        setCloudBackupError(rawMsg);
+      }
+    } finally {
+      setIsBackingUpToCloud(false);
+    }
+  };
 
   const currentUserSub = props.activeSubscription || getActiveUserSubscription();
   const userHasProLaudo = hasProLaudoAccess(currentUserSub);
@@ -652,17 +723,6 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               <Bot className="w-3.5 h-3.5" />
               <span>Gerar Checklist IA</span>
             </button>
-
-            {/* Automação dos Disparos de Convites em Massa */}
-            <button
-              type="button"
-              onClick={() => onNavigate('invitations')}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/50 shadow-xs transition cursor-pointer whitespace-nowrap shrink-0"
-              title="Abrir Automação dos Disparos de Convites em Massa (WhatsApp, E-mail e CCO p/ 300+ Construtoras)"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>Automação Convites em Massa</span>
-            </button>
           </div>
         </div>
 
@@ -1126,10 +1186,16 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           {/* Pre-Construction Checklist Display */}
           {project.preConstructionChecklist && project.preConstructionChecklist.length > 0 ? (
             <div className="pt-2">
-              <PreConstructionChecklist
-                checklist={project.preConstructionChecklist}
-                onUpdate={(checklist) => onUpdateProject({ ...project, preConstructionChecklist: checklist })}
-              />
+              <Suspense
+                fallback={
+                  <div className="h-28 rounded-2xl bg-slate-100 dark:bg-slate-800/60 animate-pulse" />
+                }
+              >
+                <PreConstructionChecklist
+                  checklist={project.preConstructionChecklist}
+                  onUpdate={(checklist) => onUpdateProject({ ...project, preConstructionChecklist: checklist })}
+                />
+              </Suspense>
             </div>
           ) : (
             <div className="p-4 bg-white/60 dark:bg-slate-800/40 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-500">
@@ -1273,25 +1339,48 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
         onNavigateToTimeline={() => onNavigate('timeline')}
       />
 
-      {/* 🍩 Gráfico de Rosca: Distribuição do Orçamento por Categoria de Despesa */}
-      <ExpenseCategoryDonutChart
-        expenses={expenses}
-        budgetTotal={totalPlanned}
-        onOpenNewExpense={onOpenNewExpense}
-      />
+      {/* 🍩 Gráfico de Rosca: Distribuição do Orçamento por Categoria de Despesa (Lazy Loaded) */}
+      <Suspense
+        fallback={
+          <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm h-80 flex items-center justify-center">
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+              <span>Carregando gráfico de distribuição...</span>
+            </div>
+          </div>
+        }
+      >
+        <ExpenseCategoryDonutChart
+          expenses={expenses}
+          budgetTotal={totalPlanned}
+          onOpenNewExpense={onOpenNewExpense}
+        />
+      </Suspense>
 
       {/* 📊 Relatório Consolidado (Orçado vs Realizado & Progresso das Fases com Exportação CSV) */}
-      <ConsolidatedReportCard
-        project={project}
-        expenses={expenses}
-        phases={phases}
-      />
+      <Suspense
+        fallback={
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm h-36 animate-pulse" />
+        }
+      >
+        <ConsolidatedReportCard
+          project={project}
+          expenses={expenses}
+          phases={phases}
+        />
+      </Suspense>
 
       {/* 📸 Galeria de Fotos do Projeto (Câmera, Pastas e Vínculo a RDOs/Laudos) */}
-      <ProjectPhotoGallery
-        project={project}
-        rdos={rdos}
-      />
+      <Suspense
+        fallback={
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm h-48 animate-pulse" />
+        }
+      >
+        <ProjectPhotoGallery
+          project={project}
+          rdos={rdos}
+        />
+      </Suspense>
 
       {/* 🍱 Flagship Bento Grid (Main Showcase) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -1498,7 +1587,7 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           <div className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-3">
             Ações Rápidas de Campo
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
             <button
               onClick={onOpenNewRdo}
               className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
@@ -1521,14 +1610,6 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
             >
               <Briefcase className="w-5 h-5 mx-auto text-amber-500 mb-1" />
               <span className="text-xs font-bold text-slate-900 dark:text-white block">Vagas & Mão de Obra</span>
-            </button>
-
-            <button
-              onClick={() => onNavigate('invitations')}
-              className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-2xl border border-slate-200/80 dark:border-slate-700 transition text-center group shadow-2xs cursor-pointer"
-            >
-              <Send className="w-5 h-5 mx-auto text-emerald-500 mb-1" />
-              <span className="text-xs font-bold text-slate-900 dark:text-white block">Disparo Convites</span>
             </button>
 
             <button
@@ -1557,37 +1638,106 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
           </div>
         </div>
 
-        {/* Bento 8: Google Drive Cloud Card (span-2) */}
-        <div className="md:col-span-2 lg:col-span-2 bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center shrink-0">
-              <FolderSync className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">Google Drive Backup</h4>
-                <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
-                  {isAuthenticated ? 'Conectado' : 'Disponível'}
-                </span>
+        {/* Bento 8: Google Drive Cloud Backup Card (span-2) */}
+        <div className="md:col-span-2 lg:col-span-2 bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center shrink-0 border border-amber-200/60 dark:border-amber-800/50">
+                <Archive className="w-6 h-6" />
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                {isAuthenticated 
-                  ? 'Pasta /Mãos em Obra sincronizada na nuvem.' 
-                  : 'Faça backup dos RDOs, fotos e notas diretamente no Drive.'}
-              </p>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">Cloud Backup · Google Drive</h4>
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                    {isAuthenticated ? 'Drive Conectado' : 'Pronto para Conectar'}
+                  </span>
+                  <span className="px-2 py-0.5 text-[10px] font-mono tabular-nums font-semibold rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                    GZIP · {(props.allProjects?.length || 1)} obra(s) · {expenses.length} desp. · {rdos.length} RDO(s)
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Salve uma cópia compactada (.json.gz) de projetos, etapas, despesas e RDOs na pasta <span className="font-semibold text-slate-700 dark:text-slate-300">/Backups Compactados</span> do seu Google Drive.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleCloudBackup}
+                disabled={isBackingUpToCloud}
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 rounded-2xl text-xs font-black transition flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+              >
+                {isBackingUpToCloud ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Compactando &amp; Enviando...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4" />
+                    <span>Cloud Backup (.gz)</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={onSyncDrive}
+                className="px-4 py-2.5 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+              >
+                <FolderSync className="w-3.5 h-3.5" />
+                <span>Abrir Drive</span>
+              </button>
             </div>
           </div>
 
-          <button
-            onClick={onSyncDrive}
-            className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 shrink-0 shadow-xs"
-          >
-            <FolderSync className="w-3.5 h-3.5" />
-            <span>{isAuthenticated ? 'Sincronizar Agora' : 'Conectar Drive'}</span>
-          </button>
+          {cloudBackupError && (
+            <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 flex items-start gap-2.5 text-xs text-rose-800 dark:text-rose-200">
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+              <span>{cloudBackupError}</span>
+            </div>
+          )}
+
+          {lastCloudBackup && !cloudBackupError && (
+            <div className="p-3 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200/80 dark:border-emerald-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5 sm:mt-0" />
+                <div className="min-w-0">
+                  <div className="font-semibold text-emerald-950 dark:text-emerald-100 truncate">
+                    Último backup: <span className="font-mono text-[11px]">{lastCloudBackup.fileName}</span>
+                  </div>
+                  <div className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 font-mono tabular-nums mt-0.5">
+                    {formatBackupBytes(lastCloudBackup.rawBytes)} → {formatBackupBytes(lastCloudBackup.compressedBytes)} (-{lastCloudBackup.savedPercent}% {lastCloudBackup.format.toUpperCase()}) · {lastCloudBackup.projectsCount} obra(s), {lastCloudBackup.expensesCount} desp., {lastCloudBackup.rdosCount} RDO(s) · {new Date(lastCloudBackup.createdAt).toLocaleString('pt-BR')}
+                  </div>
+                </div>
+              </div>
+              {lastCloudBackup.file?.webViewLink && (
+                <a
+                  href={lastCloudBackup.file.webViewLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-bold text-[11px] hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40 transition shrink-0 self-start sm:self-center"
+                >
+                  <span>Abrir no Drive</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
       </div>
+
+      {/* 🧠 Metas Inteligentes: Progresso das Fases vs Orçamento */}
+      <SmartGoalsAdvisor
+        project={project}
+        phases={phases}
+        expenses={expenses}
+        goals={goals}
+        onSaveGoal={onSaveGoal}
+        onNavigate={onNavigate}
+      />
 
       {/* 🎯 Metas de Obra & Objetivos Mensais */}
       <ProjectGoals 
@@ -1620,22 +1770,18 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
               </span>
             </div>
 
-            <div className="h-72 w-full pt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-                  <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
-                  <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(val) => `R$ ${val}`} />
-                  <Tooltip 
-                    formatter={(value: any) => [`R$ ${Number(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, '']}
-                    contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                  <Bar dataKey="orcado" name="Orçado (Previsto)" fill="#f59e0b" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="realizado" name="Realizado (Efetivo)" fill="#10b981" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <Suspense
+              fallback={
+                <div className="h-72 w-full pt-4 flex items-center justify-center rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-500" />
+                    <span>Carregando gráfico comparativo...</span>
+                  </div>
+                </div>
+              }
+            >
+              <MonthlyBudgetBarChart data={chartData} />
+            </Suspense>
           </div>
 
           {/* Active Phases Bento Card */}
@@ -1819,92 +1965,96 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
 
       </div>
 
-      {/* Mercado Pago Quick Modal */}
-      <MercadoPagoModal
-        isOpen={isMpModalOpen}
-        onClose={() => setIsMpModalOpen(false)}
-        title={
-          selectedPlanForCheckout
-            ? `${selectedPlanForCheckout.name} - ${project.title}`
-            : `Planos e Pagamentos - ${project.title}`
-        }
-        amount={selectedPlanForCheckout ? selectedPlanForCheckout.price : 0}
-        selectedPlanId={selectedPlanForCheckout?.id}
-        requirePlanSelection={mpRequirePlanSelection}
-        description={`Escolha o plano ideal referente ao projeto ${project.title}`}
-        payerName={project.clientName || 'Cliente da Obra'}
-        payerEmail={project.clientEmail || 'cliente@obra.com.br'}
-        referenceId={mpRefId}
-        onPaymentSuccess={(paymentInfo) => {
-          const nameLower = (paymentInfo.planName || '').toLowerCase();
-          let chosen: {
-            planId: string;
-            planCode: string;
-            planName: string;
-            price: number;
-            billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
-          } | null = null;
+      {/* Mercado Pago Quick Modal (Lazy Loaded) */}
+      {isMpModalOpen && (
+        <Suspense fallback={null}>
+          <MercadoPagoModal
+            isOpen={isMpModalOpen}
+            onClose={() => setIsMpModalOpen(false)}
+            title={
+              selectedPlanForCheckout
+                ? `${selectedPlanForCheckout.name} - ${project.title}`
+                : `Planos e Pagamentos - ${project.title}`
+            }
+            amount={selectedPlanForCheckout ? selectedPlanForCheckout.price : 0}
+            selectedPlanId={selectedPlanForCheckout?.id}
+            requirePlanSelection={mpRequirePlanSelection}
+            description={`Escolha o plano ideal referente ao projeto ${project.title}`}
+            payerName={project.clientName || 'Cliente da Obra'}
+            payerEmail={project.clientEmail || 'cliente@obra.com.br'}
+            referenceId={mpRefId}
+            onPaymentSuccess={(paymentInfo) => {
+              const nameLower = (paymentInfo.planName || '').toLowerCase();
+              let chosen: {
+                planId: string;
+                planCode: string;
+                planName: string;
+                price: number;
+                billingCycle: 'Mensal' | 'Anual' | 'Gratuito';
+              } | null = null;
 
-          if (nameLower.includes('anual') || Math.abs(paymentInfo.amount - 499.00) < 0.5 || paymentInfo.amount >= 400) {
-            chosen = {
-              planId: 'plan-005',
-              planCode: 'Anual Construtor',
-              planName: 'Anual Construtor',
-              price: 499.00,
-              billingCycle: 'Anual',
-            };
-          } else if (Math.abs(paymentInfo.amount - 29.90) < 0.05 || nameLower.includes('mensal pro')) {
-            chosen = {
-              planId: 'plan-001',
-              planCode: 'Mensal Pro',
-              planName: 'Mensal Pro',
-              price: 29.90,
-              billingCycle: 'Mensal',
-            };
-          } else if (Math.abs(paymentInfo.amount - 49.90) < 0.05 || nameLower.includes('construtor')) {
-            chosen = {
-              planId: 'plan-002',
-              planCode: 'Mensal Construtor',
-              planName: 'Mensal Construtor',
-              price: 49.90,
-              billingCycle: 'Mensal',
-            };
-          } else if (Math.abs(paymentInfo.amount - 25.00) < 0.05 || nameLower.includes('básico')) {
-            chosen = {
-              planId: 'plan-003',
-              planCode: 'Mensal Básico',
-              planName: 'Mensal Básico',
-              price: 25.00,
-              billingCycle: 'Mensal',
-            };
-          } else if (paymentInfo.amount === 0) {
-            chosen = {
-              planId: 'plan-004',
-              planCode: 'Gratuito Lançamento',
-              planName: 'Cadastro Gratuito',
-              price: 0,
-              billingCycle: 'Gratuito',
-            };
-          } else {
-            onOpenNewExpense();
-          }
+              if (nameLower.includes('anual') || Math.abs(paymentInfo.amount - 499.00) < 0.5 || paymentInfo.amount >= 400) {
+                chosen = {
+                  planId: 'plan-005',
+                  planCode: 'Anual Construtor',
+                  planName: 'Anual Construtor',
+                  price: 499.00,
+                  billingCycle: 'Anual',
+                };
+              } else if (Math.abs(paymentInfo.amount - 29.90) < 0.05 || nameLower.includes('mensal pro')) {
+                chosen = {
+                  planId: 'plan-001',
+                  planCode: 'Mensal Pro',
+                  planName: 'Mensal Pro',
+                  price: 29.90,
+                  billingCycle: 'Mensal',
+                };
+              } else if (Math.abs(paymentInfo.amount - 49.90) < 0.05 || nameLower.includes('construtor')) {
+                chosen = {
+                  planId: 'plan-002',
+                  planCode: 'Mensal Construtor',
+                  planName: 'Mensal Construtor',
+                  price: 49.90,
+                  billingCycle: 'Mensal',
+                };
+              } else if (Math.abs(paymentInfo.amount - 25.00) < 0.05 || nameLower.includes('básico')) {
+                chosen = {
+                  planId: 'plan-003',
+                  planCode: 'Mensal Básico',
+                  planName: 'Mensal Básico',
+                  price: 25.00,
+                  billingCycle: 'Mensal',
+                };
+              } else if (paymentInfo.amount === 0) {
+                chosen = {
+                  planId: 'plan-004',
+                  planCode: 'Gratuito Lançamento',
+                  planName: 'Cadastro Gratuito',
+                  price: 0,
+                  billingCycle: 'Gratuito',
+                };
+              } else {
+                onOpenNewExpense();
+              }
 
-          if (chosen) {
-            setActiveUserSubscription(chosen);
-            syncEnrolledSubscriberToServer({
-              subscriberName: user?.displayName || project.clientName || 'Assinante Mãos em Obra',
-              subscriberEmail: user?.email || project.clientEmail || '',
-              subscriberRole: chosen.planCode.includes('Construtor') ? 'Construtora / Empreiteiro' : 'Solicitante / Cliente',
-              planType: chosen.planCode,
-              amount: chosen.price,
-              method: paymentInfo.method === 'pix' ? 'PIX' : 'Mercado Pago',
-              transactionId: paymentInfo.paymentId,
-              mpPaymentId: paymentInfo.paymentId,
-              mpVerifiedStatus: chosen.price > 0 ? 'approved' : undefined,
-            }).then(() => loadRealSubscribers(true));
-          }
-        }}
-      />
+              if (chosen) {
+                setActiveUserSubscription(chosen);
+                syncEnrolledSubscriberToServer({
+                  subscriberName: user?.displayName || project.clientName || 'Assinante Mãos em Obra',
+                  subscriberEmail: user?.email || project.clientEmail || '',
+                  subscriberRole: chosen.planCode.includes('Construtor') ? 'Construtora / Empreiteiro' : 'Solicitante / Cliente',
+                  planType: chosen.planCode,
+                  amount: chosen.price,
+                  method: paymentInfo.method === 'pix' ? 'PIX' : 'Mercado Pago',
+                  transactionId: paymentInfo.paymentId,
+                  mpPaymentId: paymentInfo.paymentId,
+                  mpVerifiedStatus: chosen.price > 0 ? 'approved' : undefined,
+                }).then(() => loadRealSubscribers(true));
+              }
+            }}
+          />
+        </Suspense>
+      )}
 
     </div>
   );

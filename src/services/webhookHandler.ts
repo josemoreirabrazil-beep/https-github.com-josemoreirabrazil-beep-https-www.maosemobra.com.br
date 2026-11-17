@@ -390,9 +390,10 @@ export async function processMercadoPagoRedirectReturn(
 }
 
 /**
- * Starts automatic real-time sync with webhook and receipts state
- * Uses exponential backoff when there are no pending expenses (or on consecutive network failures)
- * to minimize unnecessary network and processing load.
+ * Starts automatic real-time sync with webhook and receipts state.
+ * Uses exponential backoff (8s -> 16s -> 32s -> ... up to 5 min) whenever the
+ * webhook returns no new approved/updated expenses or there are no pending expenses,
+ * minimizing client CPU, battery, and network consumption.
  */
 export function startAutomaticWebhookSync(options: {
   projectId: string;
@@ -405,7 +406,7 @@ export function startAutomaticWebhookSync(options: {
   onBackoffChange?: (nextIntervalMs: number, idleCycles: number) => void;
 }): () => void {
   const baseInterval = Math.max(1000, options.baseIntervalMs ?? options.intervalMs ?? 8000);
-  const maxInterval = Math.max(baseInterval, options.maxIntervalMs ?? 300000);
+  const maxInterval = Math.max(baseInterval, options.maxIntervalMs ?? 300000); // 5 minutos (300.000 ms)
   const backoffFactor = Math.max(1.1, options.backoffFactor ?? 2);
 
   let currentInterval = baseInterval;
@@ -413,6 +414,7 @@ export function startAutomaticWebhookSync(options: {
   let stopped = false;
   let isPolling = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let knownPendingIds: Set<string> | null = null;
 
   const scheduleNext = (delayMs: number) => {
     if (stopped) return;
@@ -442,16 +444,25 @@ export function startAutomaticWebhookSync(options: {
     isPolling = true;
 
     try {
-      const pendingIds = options.getPendingExpenseIds();
+      const pendingIds = options.getPendingExpenseIds() || [];
 
-      // Sem despesas pendentes: evita requisições e aumenta intervalo exponencialmente
-      if (!pendingIds || pendingIds.length === 0) {
+      // Sem despesas pendentes: evita requisições e aumenta o intervalo exponencialmente
+      if (pendingIds.length === 0) {
+        knownPendingIds = new Set();
         applyBackoff();
         return;
       }
 
-      // Há despesas pendentes: retorna ao intervalo base se o último ciclo foi ocioso
-      let successfulRequests = 0;
+      // Detecta se surgiram novas despesas pendentes desde a última verificação
+      const hasNewPendingExpenses =
+        knownPendingIds !== null && pendingIds.some((id) => !knownPendingIds!.has(id));
+      knownPendingIds = new Set(pendingIds);
+
+      if (hasNewPendingExpenses) {
+        resetBackoff();
+      }
+
+      let updatesFound = 0;
       let failedRequests = 0;
 
       for (const id of pendingIds) {
@@ -462,10 +473,12 @@ export function startAutomaticWebhookSync(options: {
             failedRequests += 1;
             continue;
           }
-          successfulRequests += 1;
           const data = await res.json();
           if (data.found && data.status === 'approved') {
+            updatesFound += 1;
             options.onExpenseApproved(id, data.amount || 0);
+          } else if (data.found && data.isFresh) {
+            updatesFound += 1;
           }
         } catch {
           failedRequests += 1;
@@ -473,9 +486,11 @@ export function startAutomaticWebhookSync(options: {
         }
       }
 
-      if (successfulRequests > 0) {
+      // Só mantém intervalo mínimo se houve confirmação/atualização real no webhook
+      // ou se surgiram novas despesas pendentes com resposta válida do servidor.
+      if (updatesFound > 0 || (hasNewPendingExpenses && failedRequests === 0)) {
         resetBackoff();
-      } else if (failedRequests > 0) {
+      } else {
         applyBackoff();
       }
     } finally {
@@ -490,8 +505,8 @@ export function startAutomaticWebhookSync(options: {
     if (stopped || typeof document === 'undefined' || document.visibilityState !== 'visible') {
       return;
     }
-    const pendingIds = options.getPendingExpenseIds();
-    if (pendingIds && pendingIds.length > 0 && currentInterval > baseInterval) {
+    const pendingIds = options.getPendingExpenseIds() || [];
+    if (pendingIds.length > 0 && currentInterval > baseInterval) {
       resetBackoff();
       if (!isPolling) {
         scheduleNext(baseInterval);
