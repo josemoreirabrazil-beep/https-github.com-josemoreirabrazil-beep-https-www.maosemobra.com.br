@@ -1,26 +1,16 @@
 import React, { useState } from 'react';
-import { 
-  HardHat, 
-  ChevronDown, 
-  Plus, 
-  Cloud, 
-  CloudCheck, 
-  CloudOff, 
-  RefreshCw, 
-  FolderSync, 
-  LogOut, 
-  ExternalLink,
+import {
+  HardHat,
+  ChevronDown,
+  Plus,
+  RefreshCw,
+  FolderSync,
+  LogOut,
   Building,
   CheckCircle2,
-  AlertCircle,
-  FileSpreadsheet,
   ShieldCheck,
   Download,
-  Wallet,
-  ArrowUpRight,
-  FileCheck2,
-  Search,
-  Sparkles
+  Search
 } from 'lucide-react';
 import type { Project, DailyLog, Expense, Phase } from '../types';
 import { googleSignIn, logout } from '../services/firebaseAuth';

@@ -1273,8 +1273,12 @@ export const DashboardView: React.FC<DashboardViewProps> = (props) => {
         onNavigateToTimeline={() => onNavigate('timeline')}
       />
 
-      {/* 🍩 Gráfico de Rosca: Distribuição de Gastos por Categoria */}
-      <ExpenseCategoryDonutChart expenses={expenses} />
+      {/* 🍩 Gráfico de Rosca: Distribuição do Orçamento por Categoria de Despesa */}
+      <ExpenseCategoryDonutChart
+        expenses={expenses}
+        budgetTotal={totalPlanned}
+        onOpenNewExpense={onOpenNewExpense}
+      />
 
       {/* 📊 Relatório Consolidado (Orçado vs Realizado & Progresso das Fases com Exportação CSV) */}
       <ConsolidatedReportCard
