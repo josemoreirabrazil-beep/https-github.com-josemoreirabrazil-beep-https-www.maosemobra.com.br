@@ -18,9 +18,14 @@ export function usePushNotifications() {
   const [permission, setPermission] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
-  const [token, setToken] = useState<string | null>(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('maos_em_obra_fcm_token') : null
-  );
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return localStorage.getItem('maos_em_obra_fcm_token');
+    } catch {
+      return null;
+    }
+  });
   const [latestNotification, setLatestNotification] = useState<PushNotificationPayload | null>(null);
   const [settings, setSettings] = useState<NotificationSettingsConfig>(() => loadNotificationSettings());
   const [history, setHistory] = useState<PushNotificationHistoryItem[]>(() => loadPushNotificationHistory());
@@ -30,9 +35,9 @@ export function usePushNotifications() {
       setIsSupported(true);
       setPermission(Notification.permission);
 
-      // Register Service Worker for FCM
+      // Register Service Worker for FCM on isolated scope so it does not displace root /sw.js
       navigator.serviceWorker
-        .register('/service-worker.js')
+        .register('/service-worker.js', { scope: '/firebase-cloud-messaging-push-scope' })
         .then((reg) => {
           console.log('FCM Service Worker registered successfully with scope:', reg.scope);
         })

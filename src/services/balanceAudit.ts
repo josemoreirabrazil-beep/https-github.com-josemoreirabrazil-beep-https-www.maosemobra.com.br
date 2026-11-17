@@ -69,7 +69,14 @@ export function resolveCurrentActorContext(
 
   const sub = getActiveUserSubscription();
   const isPaid = hasPaidServiceAccess(sub);
-  const storedUserEmail = overrideEmail || localStorage.getItem('maos_em_obra_last_user_email') || '';
+  let storedUserEmail = overrideEmail || '';
+  if (!storedUserEmail) {
+    try {
+      storedUserEmail = localStorage.getItem('maos_em_obra_last_user_email') || '';
+    } catch {
+      storedUserEmail = '';
+    }
+  }
 
   if (overrideRole) {
     return {

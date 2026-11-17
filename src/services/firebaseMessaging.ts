@@ -4,7 +4,7 @@ import { app } from './firebaseAuth';
 let messaging: any = null;
 
 try {
-  if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+  if (app && typeof window !== 'undefined' && 'serviceWorker' in navigator) {
     messaging = getMessaging(app);
   }
 } catch (err) {

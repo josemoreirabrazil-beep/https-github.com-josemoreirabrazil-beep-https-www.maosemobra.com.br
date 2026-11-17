@@ -1,16 +1,38 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { 
   getAuth, 
   signInWithPopup, 
   GoogleAuthProvider, 
   onAuthStateChanged, 
   signOut,
+  type Auth,
   type User 
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
+const viteEnv: Record<string, string | undefined> = (import.meta as any).env || {};
+
+const resolvedFirebaseConfig = {
+  ...firebaseConfig,
+  apiKey: viteEnv.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: viteEnv.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  projectId: viteEnv.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  storageBucket: viteEnv.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: viteEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId,
+  appId: viteEnv.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+};
+
+let app: FirebaseApp | null = null;
+let auth: Auth | null = null;
+
+try {
+  app = getApps().length === 0 ? initializeApp(resolvedFirebaseConfig) : getApp();
+  auth = getAuth(app);
+} catch (err) {
+  console.warn('Firebase Auth initialization skipped/unavailable:', err);
+}
+
+export { app, auth };
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/drive.file');
@@ -26,17 +48,18 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  if (!auth) {
+    if (onAuthFailure) onAuthFailure();
+    return () => {};
+  }
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn) {
-        // User is logged in to Firebase, but access token might need fresh popup if expired
-        // We still provide the user
         if (onAuthSuccess && cachedAccessToken) {
           onAuthSuccess(user, cachedAccessToken);
         } else if (onAuthFailure) {
-          // Token not in memory yet, will be retrieved on user login click or refreshed
           onAuthFailure();
         }
       }
@@ -48,6 +71,9 @@ export const initAuth = (
 };
 
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  if (!auth) {
+    throw new Error('Autenticação Firebase indisponível neste navegador.');
+  }
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
@@ -59,6 +85,12 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     cachedAccessToken = credential.accessToken;
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
+    if (error?.code === 'auth/unauthorized-domain') {
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'domínio atual';
+      throw new Error(
+        `Domínio "${host}" ainda não autorizado no Firebase Authentication. Adicione "${host}" em Firebase Console > Authentication > Settings > Authorized domains.`
+      );
+    }
     console.error('Erro na autenticação com o Google:', error);
     throw error;
   } finally {
@@ -75,12 +107,23 @@ export const getCachedGoogleToken = (): string | null => {
 };
 
 export const subscribeToAuthChanges = (callback: (user: User | null) => void) => {
-  return onAuthStateChanged(auth, (user) => {
-    callback(user);
-  });
+  if (!auth) {
+    callback(null);
+    return () => {};
+  }
+  try {
+    return onAuthStateChanged(auth, (user) => {
+      callback(user);
+    });
+  } catch {
+    callback(null);
+    return () => {};
+  }
 };
 
 export const logout = async () => {
-  await signOut(auth);
+  if (auth) {
+    await signOut(auth).catch(() => {});
+  }
   cachedAccessToken = null;
 };

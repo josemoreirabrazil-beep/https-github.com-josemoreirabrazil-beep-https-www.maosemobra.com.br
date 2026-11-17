@@ -72,18 +72,30 @@ export function loadProjects(): Project[] {
 export const getProjects = loadProjects;
 
 export function saveProjects(projects: Project[]): void {
-  localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(projects));
+  try {
+    localStorage.setItem(STORAGE_KEYS.PROJECTS, JSON.stringify(projects));
+  } catch (e) {
+    console.error('Failed to save projects:', e);
+  }
 }
 
 export function loadCurrentProjectId(): string {
-  const current = localStorage.getItem(STORAGE_KEYS.CURRENT_PROJECT_ID);
-  if (current) return current;
+  try {
+    const current = localStorage.getItem(STORAGE_KEYS.CURRENT_PROJECT_ID);
+    if (current) return current;
+  } catch {
+    // ignore storage read error
+  }
   const projects = loadProjects();
   return projects[0]?.id || 'proj-1';
 }
 
 export function saveCurrentProjectId(id: string): void {
-  localStorage.setItem(STORAGE_KEYS.CURRENT_PROJECT_ID, id);
+  try {
+    localStorage.setItem(STORAGE_KEYS.CURRENT_PROJECT_ID, id);
+  } catch (e) {
+    console.error('Failed to save current project id:', e);
+  }
 }
 
 export function loadPhases(projectId?: string): Phase[] {
@@ -226,7 +238,11 @@ export function loadTeam(): TeamMemberOrSupplier[] {
 export const getTeamMembers = loadTeam;
 
 export function saveTeam(team: TeamMemberOrSupplier[]): void {
-  localStorage.setItem(STORAGE_KEYS.TEAM, JSON.stringify(team));
+  try {
+    localStorage.setItem(STORAGE_KEYS.TEAM, JSON.stringify(team));
+  } catch (e) {
+    console.error('Failed to save team:', e);
+  }
 }
 export const saveTeamMembers = saveTeam;
 

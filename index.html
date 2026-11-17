@@ -17,9 +17,14 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Mãos em Obra" />
     <link rel="manifest" href="/manifest.json" />
-    <script src="https://sdk.mercadopago.com/js/v2"></script>
+    <script src="https://sdk.mercadopago.com/js/v2" async></script>
   </head>
   <body>
+    <noscript>
+      <div style="padding:24px;font-family:sans-serif;text-align:center;">
+        Ative o JavaScript no navegador para utilizar o sistema Mãos em Obra.
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

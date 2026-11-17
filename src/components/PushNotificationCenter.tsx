@@ -93,8 +93,12 @@ export const PushNotificationCenter: React.FC<PushNotificationCenterProps> = ({
   }, [isAdminAuthenticated]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('maos_em_obra_fcm_token');
-    if (saved) setFcmToken(saved);
+    try {
+      const saved = localStorage.getItem('maos_em_obra_fcm_token');
+      if (saved) setFcmToken(saved);
+    } catch {
+      // ignore storage errors
+    }
 
     fetchActiveSubscriberNotices()
       .then((res) => {

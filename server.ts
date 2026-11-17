@@ -7,7 +7,6 @@ import crypto from 'crypto';
 import http from 'http';
 import https from 'https';
 import zlib from 'zlib';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { MercadoPagoConfig, Preference, Payment, PreApproval, PreApprovalPlan } from 'mercadopago';
 import dotenv from 'dotenv';
@@ -26,9 +25,16 @@ function resolvePublicAppUrl(req: express.Request): string {
     return envUrl.replace(/\/+$/, '');
   }
   const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-  const proto = forwardedProto || req.protocol || 'https';
-  const host = req.get('host') || 'localhost:3000';
-  return `${proto}://${host}`;
+  const host = req.get('host');
+  if (host) {
+    const proto = forwardedProto || req.protocol || 'https';
+    return `${proto}://${host}`;
+  }
+  const vercelProdUrl = (process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL || '').trim();
+  if (vercelProdUrl) {
+    return `https://${vercelProdUrl.replace(/^https?:\/\//i, '').replace(/\/+$/, '')}`;
+  }
+  return 'http://localhost:3000';
 }
 
 // Master Global Credentials
@@ -1614,7 +1620,9 @@ const fiscalTransmissionLogs: FiscalTransmissionLog[] = [];
 // ==========================================
 // 🔐 COFRE CRIPTOGRÁFICO PERSISTENTE (AES-256-GCM) PARA CERTIFICADO A1 & ESTADO FISCAL
 // ==========================================
-const FISCAL_VAULT_DIR = path.join(process.cwd(), '.data');
+const FISCAL_VAULT_DIR = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? path.join(os.tmpdir(), 'maos-em-obra-data')
+  : path.join(process.cwd(), '.data');
 const FISCAL_VAULT_FILE = path.join(FISCAL_VAULT_DIR, 'fiscal-vault.json');
 const DEFAULT_FISCAL_VAULT_SECRET = '8RPM758ZL3AVZ6';
 
@@ -7269,7 +7277,8 @@ app.post('/api/fiscal/nfse/:id/cancel', async (req, res) => {
 
 // Setup Vite middleware for development or serve dist in production
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -7277,10 +7286,12 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (_req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   app.listen(PORT, '0.0.0.0', () => {
@@ -7288,4 +7299,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  startServer();
+}
+
+export default app;
